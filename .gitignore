@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.key
+*.log
+coverage.out
+coverage.html
+.DS_Store
+/bin/
+/tmp/
+
+# Workspace for developing against a local rho-billing checkout. It is
+# machine-local: the published module must resolve its dependency normally.
+go.work
+go.work.sum

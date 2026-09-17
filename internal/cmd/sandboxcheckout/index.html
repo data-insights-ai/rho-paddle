@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rho Billing sandbox capture</title>
+  <style>
+    body { font: 16px/1.4 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #111; }
+    code { font-family: ui-monospace, monospace; }
+    .card { border: 1px solid #ccc; padding: 1rem 1.25rem; border-radius: 8px; }
+    button { font: inherit; padding: 0.5rem 1rem; cursor: pointer; }
+    #status { margin-top: 1rem; }
+    .ok { color: #0a5; }
+    .wait { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Sandbox card capture</h1>
+  <p>This page is a local operator tool. It is not a product checkout. Paddle.js overlay collects the test card; this library still has no hosted billing UI.</p>
+  <div class="card">
+    <p>Use Paddle sandbox test card:</p>
+    <ul>
+      <li>Number <code>4242 4242 4242 4242</code></li>
+      <li>Any future expiry</li>
+      <li>CVC <code>100</code></li>
+      <li>Any name</li>
+    </ul>
+    <p>Transaction <code id="txn"></code></p>
+    <p>Status <strong id="status-text" class="wait">loading</strong></p>
+    <p><button id="open" type="button">Open checkout overlay</button></p>
+  </div>
+  <p id="status"></p>
+  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+  <script>
+    async function session() {
+      const res = await fetch("/session");
+      if (!res.ok) throw new Error("session " + res.status);
+      return res.json();
+    }
+    async function poll() {
+      const res = await fetch("/status");
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById("status-text");
+      el.textContent = data.status + (data.payment_method_id ? " " + data.payment_method_id : "");
+      el.className = (data.status === "paid" || data.status === "completed") ? "ok" : "wait";
+      return data;
+    }
+    function captured(status) {
+      return status === "paid" || status === "completed";
+    }
+    session().then(async (cfg) => {
+      document.getElementById("txn").textContent = cfg.transaction_id;
+      const current = await fetch("/status").then((res) => res.json());
+      await poll();
+      if (captured(current.status) || window.location.pathname === "/done") {
+        document.getElementById("status").textContent = "Payment captured. You can close this tab.";
+        document.getElementById("open").disabled = true;
+        return;
+      }
+      Paddle.Environment.set("sandbox");
+      Paddle.Initialize({
+        token: cfg.token,
+        eventCallback: function (ev) {
+          if (ev && ev.name) {
+            document.getElementById("status").textContent = "Paddle.js event: " + ev.name;
+          }
+          poll().then((data) => {
+            if (data && captured(data.status) && window.location.pathname !== "/done") {
+              window.location.replace("/done");
+            }
+          });
+        }
+      });
+      function openCheckout() {
+        Paddle.Checkout.open({
+          transactionId: cfg.transaction_id,
+          settings: {
+            displayMode: "overlay",
+            variant: "one-page",
+            theme: "light",
+            locale: "en",
+            allowedPaymentMethods: ["card"]
+          }
+        });
+      }
+      document.getElementById("open").addEventListener("click", openCheckout);
+      openCheckout();
+      setInterval(poll, 2000);
+    }).catch((err) => {
+      document.getElementById("status-text").textContent = String(err);
+    });
+  </script>
+</body>
+</html>
