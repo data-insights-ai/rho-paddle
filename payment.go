@@ -87,9 +87,21 @@ func (p *TransactionProcessor) Process(ctx context.Context, claim integration.Cl
 		if err != nil {
 			return err
 		}
-		fact, err := normalizePayment(event, wire, binding, intent, quote)
+		fact, rekeyed, err := normalizePayment(event, wire, binding, intent, quote)
 		if err != nil {
 			return err
+		}
+		if rekeyed != nil {
+			// The provider re-issued its line ids since the checkout was
+			// bound. The paid transaction is the evidence refunds and
+			// adjustments will reference, so the binding follows it, in the
+			// same transaction as the payment fact.
+			if _, err := service.RekeyCollectionLines(ctx, purchase.RekeyInput{
+				Account: intent.Account, Scope: intent.Scope, TransactionID: wire.ID, Lines: rekeyed,
+				Actor: "paddle-transaction-processor", Reason: "provider re-issued line ids on " + event.ID,
+			}); err != nil {
+				return err
+			}
 		}
 		result, err := service.ApplyPayment(ctx, fact)
 		if err != nil {
@@ -113,54 +125,78 @@ func (p *TransactionProcessor) Process(ctx context.Context, claim integration.Cl
 	return nil
 }
 
-func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.CollectionBinding, intent purchase.Intent, quote purchase.Quote) (purchase.PaymentFact, error) {
+// normalizePayment turns a provider transaction into the payment fact the
+// purchase service applies. For a paid or completed transaction it also
+// reports, as rekeyed, the bound lines under the provider's current line ids
+// when those differ from the ids bound at checkout; nil when they match.
+func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.CollectionBinding, intent purchase.Intent, quote purchase.Quote) (purchase.PaymentFact, []purchase.CollectionLine, error) {
 	if binding.Validate() != nil || intent.Validate() != nil || binding.Account != intent.Account || binding.IntentID != intent.ID || binding.Scope != intent.Scope || binding.QuoteFingerprint != intent.QuoteFingerprint || binding.TransactionID != wire.ID || !paddlewire.ID(wire.CustomerID, "ctm_") || binding.CustomerID != wire.CustomerID || wire.Currency != intent.Currency {
-		return purchase.PaymentFact{}, billing.ErrConflict
+		return purchase.PaymentFact{}, nil, billing.ErrConflict
 	}
 	if quote.Validate() != nil || quote.Account != intent.Account || quote.ID != intent.QuoteID || quote.Fingerprint() != intent.QuoteFingerprint {
-		return purchase.PaymentFact{}, billing.ErrConflict
+		return purchase.PaymentFact{}, nil, billing.ErrConflict
 	}
 	occurredAt := billing.CanonicalTime(event.OccurredAt)
 	status, err := paymentStatus(event.Type, wire, occurredAt)
 	if err != nil {
-		return purchase.PaymentFact{}, err
+		return purchase.PaymentFact{}, nil, err
 	}
 	fact := purchase.PaymentFact{Account: intent.Account, Scope: intent.Scope, EventID: event.ID, TransactionID: wire.ID, IntentID: intent.ID, Status: status, Currency: wire.Currency, OccurredAt: occurredAt}
 	if status != purchase.FactPaid && status != purchase.FactCompleted {
-		return fact, nil
+		return fact, nil, nil
 	}
 	totals := wire.Details.Totals
 	if totals.Currency != wire.Currency || len(wire.Details.Lines) != len(binding.Lines) || len(wire.Payments) > 1000 {
-		return purchase.PaymentFact{}, ErrResponse
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	gross, err := paddlewire.MinorUnits(totals.Total)
 	if err != nil {
-		return purchase.PaymentFact{}, err
+		return purchase.PaymentFact{}, nil, err
 	}
 	tax, err := paddlewire.MinorUnits(totals.Tax)
 	if err != nil || tax > gross {
-		return purchase.PaymentFact{}, ErrResponse
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	credit, err := paddlewire.MinorUnits(totals.Credit)
 	if err != nil || credit > gross {
-		return purchase.PaymentFact{}, ErrResponse
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	if credit != 0 {
-		return purchase.PaymentFact{}, unresolvedPayment("provider_credit_allocation_unresolved")
+		return purchase.PaymentFact{}, nil, unresolvedPayment("provider_credit_allocation_unresolved")
 	}
 	grand, err := paddlewire.MinorUnits(totals.GrandTotal)
 	if err != nil || gross-credit != grand {
-		return purchase.PaymentFact{}, ErrResponse
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	if totals.CreditToBalance != "0" || totals.Balance != "0" {
-		return purchase.PaymentFact{}, unresolvedPayment("nonzero_balance_or_generated_credit")
+		return purchase.PaymentFact{}, nil, unresolvedPayment("nonzero_balance_or_generated_credit")
 	}
 	if grand == 0 {
-		return purchase.PaymentFact{}, unresolvedPayment("collection_timestamp_missing_for_credit_only_payment")
+		return purchase.PaymentFact{}, nil, unresolvedPayment("collection_timestamp_missing_for_credit_only_payment")
 	}
-	lines := make(map[string]purchase.CollectionLine, len(binding.Lines))
+	// Paddle re-issues line item ids whenever it recomputes a transaction
+	// (an address arrives, tax is applied), so the id bound at checkout is
+	// not a stable identity. A provider line is matched to a bound line by
+	// its id when that still holds, otherwise by price and quantity among
+	// the bound lines not yet matched; lines that agree on both are
+	// commercially interchangeable, so which one is taken changes nothing.
+	byID := make(map[string]purchase.CollectionLine, len(binding.Lines))
 	for _, line := range binding.Lines {
-		lines[line.ProviderLineID] = line
+		byID[line.ProviderLineID] = line
+	}
+	unmatched := make([]purchase.CollectionLine, 0, len(binding.Lines))
+	matchLine := func(id, priceID string, quantity int64) (purchase.CollectionLine, bool) {
+		if mapped, ok := byID[id]; ok && mapped.ProviderPriceID == priceID && mapped.Quantity == quantity {
+			delete(byID, id)
+			return mapped, true
+		}
+		for i, mapped := range unmatched {
+			if mapped.ProviderPriceID == priceID && mapped.Quantity == quantity {
+				unmatched = append(unmatched[:i], unmatched[i+1:]...)
+				return mapped, true
+			}
+		}
+		return purchase.CollectionLine{}, false
 	}
 	var sumGross, sumTax int64
 	type collectedLine struct {
@@ -168,38 +204,60 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 		gross, tax int64
 	}
 	var collectedLines []collectedLine
+	var rekeyed []purchase.CollectionLine
+	renamed := false
+	// Lines whose bound id no longer appears become candidates for matching
+	// by content once every id match has been taken.
+	present := make(map[string]struct{}, len(wire.Details.Lines))
 	for _, line := range wire.Details.Lines {
-		mapped, ok := lines[line.ID]
-		if !ok || !paddlewire.ID(line.ID, "txnitm_") || mapped.ProviderPriceID != line.PriceID || !paddlewire.ID(line.PriceID, "pri_") || mapped.Quantity != line.Quantity {
-			return purchase.PaymentFact{}, billing.ErrConflict
+		present[line.ID] = struct{}{}
+	}
+	for _, line := range binding.Lines {
+		if _, ok := present[line.ProviderLineID]; !ok {
+			unmatched = append(unmatched, line)
+			delete(byID, line.ProviderLineID)
 		}
-		delete(lines, line.ID)
+	}
+	for _, line := range wire.Details.Lines {
+		if !paddlewire.ID(line.ID, "txnitm_") || !paddlewire.ID(line.PriceID, "pri_") {
+			return purchase.PaymentFact{}, nil, billing.ErrConflict
+		}
+		mapped, ok := matchLine(line.ID, line.PriceID, line.Quantity)
+		if !ok {
+			return purchase.PaymentFact{}, nil, billing.ErrConflict
+		}
+		if mapped.ProviderLineID != line.ID {
+			renamed = true
+		}
+		current := mapped
+		current.ProviderLineID = line.ID
+		rekeyed = append(rekeyed, current)
 		lineGross, err := paddlewire.MinorUnits(line.Totals.Total)
 		if err != nil {
-			return purchase.PaymentFact{}, err
+			return purchase.PaymentFact{}, nil, err
 		}
 		lineTax, err := paddlewire.MinorUnits(line.Totals.Tax)
 		if err != nil || lineTax > lineGross {
-			return purchase.PaymentFact{}, ErrResponse
+			return purchase.PaymentFact{}, nil, ErrResponse
 		}
 		sumGross, err = paddlewire.AddMoney(sumGross, lineGross)
 		if err != nil {
-			return purchase.PaymentFact{}, err
+			return purchase.PaymentFact{}, nil, err
 		}
 		sumTax, err = paddlewire.AddMoney(sumTax, lineTax)
 		if err != nil {
-			return purchase.PaymentFact{}, err
+			return purchase.PaymentFact{}, nil, err
 		}
 		collectedLines = append(collectedLines, collectedLine{mapped, lineGross, lineTax})
 	}
 	if sumGross != gross || sumTax != tax {
-		return purchase.PaymentFact{}, ErrResponse
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	byQuoteLine := quoteLineIndex(quote)
 	for _, line := range collectedLines {
 		allocated, err := allocateCollectionMoney(line.binding, quote, byQuoteLine, line.gross, line.tax)
 		if err != nil {
-			return purchase.PaymentFact{}, err
+			return purchase.PaymentFact{}, nil, err
 		}
 		fact.Lines = append(fact.Lines, allocated...)
 	}
@@ -212,21 +270,24 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 		capturedAt := billing.CanonicalTime(*attempt.CapturedAt)
 		amount, err := paddlewire.MinorUnits(attempt.Amount)
 		if err != nil || amount == 0 {
-			return purchase.PaymentFact{}, ErrResponse
+			return purchase.PaymentFact{}, nil, ErrResponse
 		}
 		captured, err = paddlewire.AddMoney(captured, amount)
 		if err != nil {
-			return purchase.PaymentFact{}, err
+			return purchase.PaymentFact{}, nil, err
 		}
 		if capturedAt.After(fact.CollectedAt) {
 			fact.CollectedAt = capturedAt
 		}
 	}
 	if captured != grand || fact.CollectedAt.IsZero() {
-		return purchase.PaymentFact{}, unresolvedPayment("captured_payment_evidence_incomplete")
+		return purchase.PaymentFact{}, nil, unresolvedPayment("captured_payment_evidence_incomplete")
 	}
 	fact.Gross, fact.Tax = gross, tax
-	return fact, nil
+	if !renamed {
+		rekeyed = nil
+	}
+	return fact, rekeyed, nil
 }
 
 // supportedTransactionEvent is the single list of transaction events this

@@ -91,8 +91,11 @@ func TestTransactionProcessorMismatchesRollbackInboxEffects(t *testing.T) {
 	}{
 		{name: "customer", currency: "USD", customer: "ctm_zyxwvutsrqponmlkjihgfedcba", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_abcdefghijklmnopqrstuvwxyz"},
 		{name: "currency", currency: "EUR", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_abcdefghijklmnopqrstuvwxyz"},
-		{name: "line", currency: "USD", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_zyxwvutsrqponmlkjihgfedcba", price: "pri_abcdefghijklmnopqrstuvwxyz"},
+		// A line id alone is not evidence of a mismatch: the provider re-issues
+		// line ids (see TestTransactionProcessorAcceptsReissuedLineIDsAndRekeysBinding).
+		// A different price under the bound id, or under a new one, is.
 		{name: "price", currency: "USD", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_zyxwvutsrqponmlkjihgfedcba"},
+		{name: "price under new line id", currency: "USD", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_zyxwvutsrqponmlkjihgfedcba", price: "pri_zyxwvutsrqponmlkjihgfedcba"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,4 +249,46 @@ func assertPaymentEffects(t *testing.T, f *paymentFixture) {
 
 func paddlePaymentBody(eventID, eventType, status, currency, customer, line, price string, occurred, captured time.Time) []byte {
 	return []byte(fmt.Sprintf(`{"event_id":%q,"event_type":%q,"occurred_at":%q,"data":{"id":%q,"customer_id":%q,"status":%q,"currency_code":%q,"details":{"totals":{"total":"100","tax":"0","credit":"0","credit_to_balance":"0","grand_total":"100","balance":"0","currency_code":%q},"line_items":[{"id":%q,"price_id":%q,"quantity":1,"totals":{"total":"100","tax":"0"}}]},"payments":[{"payment_attempt_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","status":"captured","amount":"100","created_at":%q,"captured_at":%q}]}}`, eventID, eventType, occurred.Format(time.RFC3339Nano), "txn_abcdefghijklmnopqrstuvwxyz", customer, status, currency, currency, line, price, captured.Add(-time.Second).Format(time.RFC3339Nano), captured.Format(time.RFC3339Nano)))
+}
+
+// Paddle re-issues transaction line item ids when it recomputes a transaction
+// (an address arrives, tax is applied), so the id bound at checkout is not the
+// id on the paid transaction. The payment must still apply, matched by price
+// and quantity, and the binding must follow the paid transaction's ids because
+// refunds and adjustments will reference those.
+func TestTransactionProcessorAcceptsReissuedLineIDsAndRekeysBinding(t *testing.T) {
+	f := newPaymentFixture(t, "rekey", true)
+	ctx := t.Context()
+	const reissued = "txnitm_zyxwvutsrqponmlkjihgfedcba"
+	if err := f.process(t, "evt_rekeypaidabcdefghijklmnopq", "transaction.paid", "paid", "USD", f.binding.CustomerID, reissued, "pri_abcdefghijklmnopqrstuvwxyz"); err != nil {
+		t.Fatalf("paid with re-issued line id: %v", err)
+	}
+	service := purchase.New(f.store.Purchases(), func() time.Time { return f.clock })
+	intent, err := service.Intent(ctx, f.account, f.intent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.Payment != purchase.PaymentPaid {
+		t.Fatalf("intent payment = %q, want paid", intent.Payment)
+	}
+	binding, err := service.CollectionBinding(ctx, f.account, f.binding.Scope, f.binding.TransactionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.Lines) != 1 || binding.Lines[0].ProviderLineID != reissued || binding.Lines[0].ProviderPriceID != "pri_abcdefghijklmnopqrstuvwxyz" || binding.Lines[0].Quantity != 1 {
+		t.Fatalf("binding after payment = %+v, want the re-issued id with unchanged content", binding.Lines)
+	}
+	if binding.IntentID != f.binding.IntentID || binding.QuoteFingerprint != f.binding.QuoteFingerprint || len(binding.Lines[0].Allocations) != 1 {
+		t.Fatalf("rekey changed more than the line id: %+v", binding.CollectionInput)
+	}
+	// The completed event then carries the same re-issued id: an ordinary
+	// replay, nothing to rekey.
+	if err := f.process(t, "evt_rekeycompletedabcdefghijkl", "transaction.completed", "completed", "USD", f.binding.CustomerID, reissued, "pri_abcdefghijklmnopqrstuvwxyz"); err != nil {
+		t.Fatalf("completed after rekey: %v", err)
+	}
+	// A different price under a new id is not a re-issue; it is a different
+	// purchase and is refused.
+	if err := f.process(t, "evt_rekeyotherpriceabcdefghijk", "transaction.completed", "completed", "USD", f.binding.CustomerID, "txnitm_otherabcdefghijklmnopqrstu", "pri_otherabcdefghijklmnopqrstu"); !errors.Is(err, billing.ErrConflict) {
+		t.Fatalf("different price under new id: %v, want ErrConflict", err)
+	}
 }

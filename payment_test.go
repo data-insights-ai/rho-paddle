@@ -22,11 +22,11 @@ func TestNormalizePaymentTaxCreditEquationAndLatestCapture(t *testing.T) {
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("33333333-3333-4333-8333-333333333333", "captured", "0", now.Add(2*time.Minute), new(now.Add(4*time.Minute))))
 	// The zero-valued third attempt is rejected; captured amounts must be real.
 	wire.Payments[2].Amount = "0"
-	if _, err := normalizePayment(event, wire, binding, intent, quote); err == nil {
+	if _, _, err := normalizePayment(event, wire, binding, intent, quote); err == nil {
 		t.Fatal("zero captured attempt was accepted")
 	}
 	wire.Payments = wire.Payments[:2]
-	fact, err := normalizePayment(event, wire, binding, intent, quote)
+	fact, _, err := normalizePayment(event, wire, binding, intent, quote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestNormalizePaymentTaxCreditEquationAndLatestCapture(t *testing.T) {
 
 	bad := wire
 	bad.Details.Totals.GrandTotal = "91"
-	if _, err := normalizePayment(event, bad, binding, intent, quote); err == nil {
+	if _, _, err := normalizePayment(event, bad, binding, intent, quote); err == nil {
 		t.Fatal("gross-credit equation mismatch was accepted")
 	}
 }
@@ -71,7 +71,7 @@ func TestNormalizePaymentUsesLatestCaptureAndRejectsOverflow(t *testing.T) {
 	// One predicate, one error: an arithmetic overflow is billing.ErrOverflow
 	// wherever it happens. It used to be ErrResponse here and ErrOverflow in
 	// the adjustment path, so matching on either caught only half the cases.
-	if _, err := normalizePayment(event, wire, binding, intent, quote); !errors.Is(err, billing.ErrOverflow) {
+	if _, _, err := normalizePayment(event, wire, binding, intent, quote); !errors.Is(err, billing.ErrOverflow) {
 		t.Fatalf("line sum overflow error=%v, want ErrOverflow", err)
 	}
 	if _, err := paddlewire.MinorUnits("9999999999999999999"); !errors.Is(err, ErrResponse) {
@@ -87,12 +87,12 @@ func TestNormalizePaymentActionRequiredAndCreditOnlyAreUnresolved(t *testing.T) 
 	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
 	action := paddlewire.Payment{ID: binding.TransactionID, CustomerID: binding.CustomerID, Status: "ready", Currency: "USD"}
 	action.Payments = append(action.Payments, paymentAttemptFixture("44444444-4444-4444-8444-444444444444", "action_required", "", now, nil))
-	fact, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.ready", OccurredAt: now.Add(time.Minute)}, action, binding, intent, quote)
+	fact, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.ready", OccurredAt: now.Add(time.Minute)}, action, binding, intent, quote)
 	if err != nil || fact.Status != purchase.FactActionRequired {
 		t.Fatalf("action-required fact=%+v err=%v", fact, err)
 	}
 	creditOnly := paymentWireFixture(binding, "completed", "100", "0", "100", "0", "0", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
-	if _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, creditOnly, binding, intent, quote); err == nil {
+	if _, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, creditOnly, binding, intent, quote); err == nil {
 		t.Fatal("credit-only payment without capture evidence was accepted")
 	} else if capability, ok := errors.AsType[*billing.CapabilityError](err); !ok || capability.Capability.Support != billing.SupportUnresolved || capability.Capability.Reason != "provider_credit_allocation_unresolved" {
 		t.Fatalf("credit-only error=%v, want unresolved capability", err)
@@ -110,7 +110,7 @@ func TestNormalizePaymentProviderCreditIsUnresolved(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			wire := paymentWireFixture(binding, "completed", "100", "0", tt.credit, "0", tt.grand, "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
-			_, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote)
+			_, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote)
 			capability, ok := errors.AsType[*billing.CapabilityError](err)
 			if !ok || capability.Capability.Support != billing.SupportUnresolved || capability.Capability.Reason != "provider_credit_allocation_unresolved" {
 				t.Fatalf("error=%v, want provider credit unresolved", err)
@@ -167,7 +167,7 @@ func TestNormalizePaymentCanonicalizesCaptureAndCreatedTimes(t *testing.T) {
 	captureAt := now.Add(4*time.Minute + 500*time.Nanosecond)
 	wire := paymentWireFixture(binding, "completed", "100", "0", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("88888888-8888-4888-8888-888888888888", "captured", "100", now.Add(3*time.Minute+500*time.Nanosecond), new(captureAt)))
-	fact, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: eventAt}, wire, binding, intent, quote)
+	fact, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: eventAt}, wire, binding, intent, quote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestNormalizePaymentRejectsMalformedAttemptEvidence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wire := base()
 			tt.edit(&wire)
-			if _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote); !errors.Is(err, ErrResponse) {
+			if _, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote); !errors.Is(err, ErrResponse) {
 				t.Fatalf("error=%v, want ErrResponse", err)
 			}
 		})
@@ -219,7 +219,7 @@ func TestNormalizePaymentRejectsMalformedAttemptEvidence(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		wire.Payments = append(wire.Payments, paymentAttemptFixture(fmt.Sprintf("%08d-aaaa-4aaa-8aaa-aaaaaaaaaaaa", i), "created", "", now, nil))
 	}
-	if _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote); !errors.Is(err, ErrResponse) {
+	if _, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote); !errors.Is(err, ErrResponse) {
 		t.Fatalf("oversized attempts error=%v, want ErrResponse", err)
 	}
 }

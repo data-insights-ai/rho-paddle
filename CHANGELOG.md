@@ -4,6 +4,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.2] - 2026-09-18
+
+Requires `github.com/data-insights-ai/rho-billing` v0.3.2.
+
+### Fixed
+
+- Paddle re-issues transaction line item ids (`txnitm_`) whenever it
+  recomputes a transaction: the checkout sending its items, an address being
+  set, tax being applied. The `TransactionProcessor` required the id bound at
+  checkout to appear on the paid transaction, so every real checkout failed
+  with a conflict at `transaction.paid` and the customer never received what
+  they paid for. Provider lines are now matched by id when it still holds and
+  otherwise by price and quantity, and the binding is re-keyed to the paid
+  transaction's ids in the same database transaction as the payment fact, so
+  later refunds and adjustments reference ids the provider still knows. A
+  different price under a new id remains a conflict.
+
 ## [0.3.1] - 2026-09-18
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.1.
