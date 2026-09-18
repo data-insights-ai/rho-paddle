@@ -4,6 +4,8 @@ github.com/data-insights-ai/rho-billing v0.2.0 h1:oem/Nc+C8z1UQ7uChgQen5RDQ8WV35
 github.com/data-insights-ai/rho-billing v0.2.0/go.mod h1:UzQ+A37htJoYwXsyTHpCr2dX6hDA3gwzIHVaWjGL6so=
 github.com/data-insights-ai/rho-billing v0.3.0 h1:QQ1P7y4Ub6t4spoa9wGTniT//XBENH+RCzwbB9b8cQ8=
 github.com/data-insights-ai/rho-billing v0.3.0/go.mod h1:BUFBnqGjVUqLoSuTQBM7sPAOvZwamNxUBncPMJReWc8=
+github.com/data-insights-ai/rho-billing v0.3.1 h1:UkXjHoGYvvuKV86oE7z7TSor7Lf82nZRrWML1zhclEU=
+github.com/data-insights-ai/rho-billing v0.3.1/go.mod h1:BUFBnqGjVUqLoSuTQBM7sPAOvZwamNxUBncPMJReWc8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -5,7 +5,7 @@ HTTP, webhooks and subscription commands onto the core library. It is not
 a general Paddle SDK.
 
 Module: `github.com/data-insights-ai/rho-paddle`. License: Apache 2.0. Go 1.26.
-Depends on `github.com/data-insights-ai/rho-billing`. Release: `v0.3.0`.
+Depends on `github.com/data-insights-ai/rho-billing`. Release: `v0.3.1`.
 
 The host owns routes, authorization, worker scheduling and secret
 storage. Constructors do no I/O.
@@ -13,8 +13,8 @@ storage. Constructors do no I/O.
 ## Install
 
 ```
-require github.com/data-insights-ai/rho-billing v0.3.0
-require github.com/data-insights-ai/rho-paddle v0.3.0
+require github.com/data-insights-ai/rho-billing v0.3.1
+require github.com/data-insights-ai/rho-paddle v0.3.1
 ```
 
 To develop against a local `rho-billing` checkout, put one beside this
@@ -89,4 +89,4 @@ Opt-in sandbox tests, and the merchant setup they need:
 
 ## Status
 
-`v0.3.0`. Pre-1.0: the exported API may change between minor versions.
+`v0.3.1`. Pre-1.0: the exported API may change between minor versions.

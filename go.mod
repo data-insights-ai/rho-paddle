@@ -3,7 +3,7 @@ module github.com/data-insights-ai/rho-paddle
 go 1.26.0
 
 require (
-	github.com/data-insights-ai/rho-billing v0.3.0
+	github.com/data-insights-ai/rho-billing v0.3.1
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
@@ -18,7 +18,7 @@ require (
 // Withdrawn before the first stable release. They remain fetchable from the
 // module proxy, which is immutable, but nothing should select them.
 retract (
-	v0.1.0 // Superseded; sandbox tests carried provider object identifiers.
-	v0.2.0 // Superseded; same.
 	v0.2.1 // Superseded by a rewritten, squashed history.
+	v0.2.0 // Superseded; same.
+	v0.1.0 // Superseded; sandbox tests carried provider object identifiers.
 )

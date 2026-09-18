@@ -81,9 +81,14 @@ func (h *webhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// provider's side; telling it otherwise invites a retry storm for an
 		// event that is safely stored.
 		w.WriteHeader(http.StatusNoContent)
-	case errors.Is(err, billing.ErrInvalid), errors.Is(err, billing.ErrNotFound):
-		// A bad signature, an unparseable payload, or an event this host cannot
-		// attribute to an account. Redelivery will not change any of those.
+	case errors.Is(err, ErrSignature), errors.Is(err, ErrTimestamp), errors.Is(err, ErrInvalid),
+		errors.Is(err, billing.ErrInvalid), errors.Is(err, billing.ErrNotFound):
+		// A bad or missing signature, a stale timestamp, an unparseable
+		// payload, or an event this host cannot attribute to an account.
+		// Redelivery will not change any of those, and answering 5xx would
+		// have the provider retry a forgery until it gave up. The verifier's
+		// own errors are listed explicitly: they are distinct values from the
+		// core's, and mapping only the core's sent every rejection to 503.
 		h.fail(r, err)
 		http.Error(w, "rejected", http.StatusBadRequest)
 	default:

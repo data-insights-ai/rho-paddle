@@ -4,6 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.1] - 2026-09-18
+
+Requires `github.com/data-insights-ai/rho-billing` v0.3.1.
+
+### Fixed
+
+- `NewWebhookHandler` answered 503 to a request the verifier rejected: a bad or
+  missing signature, a stale timestamp, an unparseable payload. The verifier's
+  errors are distinct values from the core's, and the handler mapped only the
+  core's. A 5xx asks the provider to redeliver, so a forgery was retried until
+  the provider gave up. Rejections are 400 now, and a test holds it there.
+
 ## [0.3.0] - 2026-09-17
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.0.
