@@ -103,6 +103,25 @@ type PriceSpec struct {
 	Interval BillingInterval
 	// Tax is how Amount relates to tax.
 	Tax TaxMode
+	// Quantity bounds what one transaction line may carry. Zero means the
+	// provider's default (1 to 100). A host that binds each purchase to
+	// exactly one unit, as a subscription plan does, declares 1 and 1: the
+	// checkout then cannot be changed to a quantity the host would refuse
+	// to fulfil after the money has been taken.
+	Quantity QuantityBounds
+}
+
+// QuantityBounds is the allowed quantity range of a price.
+type QuantityBounds struct {
+	Min, Max int64
+}
+
+// Declared reports whether the host set bounds rather than leaving the
+// provider's default.
+func (q QuantityBounds) Declared() bool { return q.Min != 0 || q.Max != 0 }
+
+func (q QuantityBounds) valid() bool {
+	return !q.Declared() || (q.Min >= 1 && q.Max >= q.Min)
 }
 
 // ProviderCatalog is the full set of money objects a host declares.
@@ -159,7 +178,7 @@ func (in ProviderCatalog) validate() error {
 	prices := make(map[string]struct{}, len(in.Prices))
 	for _, price := range in.Prices {
 		if !billing.ValidID(price.Key) || price.Description == "" || len(price.Description) > 200 ||
-			len(price.Currency) != 3 || price.Amount < 0 || !price.Interval.valid() || !price.Tax.valid() {
+			len(price.Currency) != 3 || price.Amount < 0 || !price.Interval.valid() || !price.Tax.valid() || !price.Quantity.valid() {
 			return ErrInvalid
 		}
 		if _, ok := products[price.ProductKey]; !ok {
@@ -178,8 +197,10 @@ func (in ProviderCatalog) validate() error {
 //
 // It is idempotent and additive: missing objects are created, matching ones are
 // left alone, and one that exists but differs is reported as ErrCatalogDrift
-// rather than edited. Nothing is ever deleted or archived — withdrawing a price
-// that live subscriptions renew against is a commercial decision.
+// rather than edited. The one exception is a price's quantity bounds, which
+// are not commercial terms and are brought in line. Nothing is ever deleted
+// or archived — withdrawing a price that live subscriptions renew against is
+// a commercial decision.
 //
 // This writes to the financial system of record, so it is an operator action:
 // run it at deploy time, not on a request path.
@@ -230,6 +251,10 @@ func (c *Client) ReconcileCatalog(ctx context.Context, in ProviderCatalog) (Cata
 			}
 		} else if err := priceMatches(found, spec, productID); err != nil {
 			return CatalogMapping{}, err
+		} else if !quantityMatches(found, spec) {
+			if found, err = c.updatePriceQuantity(ctx, found.ID, spec); err != nil {
+				return CatalogMapping{}, err
+			}
 		}
 		out.Prices[spec.Key] = billing.Reference{Scope: c.scope, ID: found.ID}
 	}
@@ -263,6 +288,32 @@ func priceMatches(got paddlewire.Price, want PriceSpec, productID string) error 
 	return nil
 }
 
+// quantityMatches reports whether the provider price carries the declared
+// bounds; an undeclared spec matches anything.
+func quantityMatches(got paddlewire.Price, want PriceSpec) bool {
+	if !want.Quantity.Declared() {
+		return true
+	}
+	return got.Quantity != nil && got.Quantity.Minimum == want.Quantity.Min && got.Quantity.Maximum == want.Quantity.Max
+}
+
+// updatePriceQuantity brings a price's quantity bounds in line with the
+// declaration. Bounds are not a commercial term, so this is the one edit
+// reconciliation makes.
+func (c *Client) updatePriceQuantity(ctx context.Context, priceID string, spec PriceSpec) (paddlewire.Price, error) {
+	request := struct {
+		Quantity paddlewire.Quantity `json:"quantity"`
+	}{paddlewire.Quantity{Minimum: spec.Quantity.Min, Maximum: spec.Quantity.Max}}
+	var out paddlewire.Price
+	if err := c.request(ctx, http.MethodPatch, "/prices/"+priceID, request, &out); err != nil {
+		return paddlewire.Price{}, err
+	}
+	if out.ID != priceID || !quantityMatches(out, spec) {
+		return paddlewire.Price{}, errors.Join(ErrResponse, ErrUncertain)
+	}
+	return out, nil
+}
+
 func (c *Client) createProduct(ctx context.Context, spec ProductSpec) (paddlewire.Product, error) {
 	request := struct {
 		Name        string            `json:"name"`
@@ -290,6 +341,7 @@ func (c *Client) createPrice(ctx context.Context, spec PriceSpec, productID stri
 		Description  string                   `json:"description"`
 		UnitPrice    paddlewire.UnitPrice     `json:"unit_price"`
 		BillingCycle *paddlewire.BillingCycle `json:"billing_cycle,omitempty"`
+		Quantity     *paddlewire.Quantity     `json:"quantity,omitempty"`
 		TaxMode      string                   `json:"tax_mode"`
 		CustomData   map[string]string        `json:"custom_data"`
 	}{
@@ -302,6 +354,9 @@ func (c *Client) createPrice(ctx context.Context, spec PriceSpec, productID stri
 	if spec.Interval.Recurring() {
 		request.BillingCycle = &paddlewire.BillingCycle{Interval: spec.Interval.Unit, Frequency: spec.Interval.Frequency}
 	}
+	if spec.Quantity.Declared() {
+		request.Quantity = &paddlewire.Quantity{Minimum: spec.Quantity.Min, Maximum: spec.Quantity.Max}
+	}
 	var out paddlewire.Price
 	if err := c.request(ctx, http.MethodPost, "/prices", request, &out); err != nil {
 		return paddlewire.Price{}, err
@@ -313,6 +368,9 @@ func (c *Client) createPrice(ctx context.Context, spec PriceSpec, productID stri
 	// for. Accepting it unchecked would let a silently coerced amount through.
 	if err := priceMatches(out, spec, productID); err != nil {
 		return paddlewire.Price{}, errors.Join(err, ErrUncertain)
+	}
+	if !quantityMatches(out, spec) {
+		return paddlewire.Price{}, errors.Join(fmt.Errorf("%w: price %q quantity bounds", ErrCatalogDrift, spec.Key), ErrUncertain)
 	}
 	return out, nil
 }

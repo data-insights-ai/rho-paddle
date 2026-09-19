@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.3] - 2026-09-19
+
+Requires `github.com/data-insights-ai/rho-billing` v0.3.2.
+
+### Added
+
+- `PriceSpec.Quantity` (`QuantityBounds{Min, Max}`): the quantity range a
+  transaction line may carry. Undeclared leaves the provider's default of
+  1 to 100. A host that binds each purchase to exactly one unit declares
+  1 and 1, so the checkout cannot be changed to a quantity the host would
+  refuse to fulfil after the money has been taken. `ReconcileCatalog`
+  brings an existing price's bounds in line by editing them; unlike amount,
+  currency, tax mode and billing cycle, they are not commercial terms.
+
 ## [0.3.2] - 2026-09-18
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.2.

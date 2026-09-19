@@ -35,6 +35,7 @@ func TestSandboxReconcileCatalogIsIdempotent(t *testing.T) {
 				Key: monthly, ProductKey: productKey, Description: "monthly " + suffix,
 				Currency: "EUR", Amount: 4900, Tax: paddle.TaxInclusive,
 				Interval: paddle.BillingInterval{Unit: "month", Frequency: 1},
+				Quantity: paddle.QuantityBounds{Min: 1, Max: 1},
 			},
 			{
 				Key: oneOff, ProductKey: productKey, Description: "one-off " + suffix,
@@ -71,6 +72,22 @@ func TestSandboxReconcileCatalogIsIdempotent(t *testing.T) {
 			t.Fatalf("reconcile created a second price for %q: %v then %v",
 				key, first.Prices[key], second.Prices[key])
 		}
+	}
+
+	// Quantity bounds are not commercial terms: a changed declaration is
+	// brought in line on the existing price, not reported as drift.
+	rebounded := declared
+	rebounded.Prices = append([]paddle.PriceSpec(nil), declared.Prices...)
+	rebounded.Prices[0].Quantity = paddle.QuantityBounds{Min: 1, Max: 3}
+	third, err := client.ReconcileCatalog(ctx, rebounded)
+	if err != nil {
+		t.Fatalf("reconcile with new quantity bounds: %v", err)
+	}
+	if third.Prices[monthly] != first.Prices[monthly] {
+		t.Fatalf("quantity change replaced the price: %v then %v", first.Prices[monthly], third.Prices[monthly])
+	}
+	if _, err := client.ReconcileCatalog(ctx, rebounded); err != nil {
+		t.Fatalf("reconcile after the quantity update must be a no-op: %v", err)
 	}
 
 	// Changing an amount under a key that already exists must not edit a live

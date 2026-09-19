@@ -25,6 +25,12 @@ type UnitPrice struct {
 }
 
 // Price is the provider's price object.
+// Quantity bounds how many units of a price one transaction line may carry.
+type Quantity struct {
+	Minimum int64 `json:"minimum"`
+	Maximum int64 `json:"maximum"`
+}
+
 type Price struct {
 	ID           string            `json:"id"`
 	ProductID    string            `json:"product_id"`
@@ -32,6 +38,7 @@ type Price struct {
 	Type         string            `json:"type"`
 	BillingCycle *BillingCycle     `json:"billing_cycle"`
 	TaxMode      string            `json:"tax_mode"`
+	Quantity     *Quantity         `json:"quantity,omitempty"`
 	UnitPrice    UnitPrice         `json:"unit_price"`
 	Status       string            `json:"status"`
 	CustomData   map[string]string `json:"custom_data"`
