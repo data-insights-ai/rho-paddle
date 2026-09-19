@@ -17,14 +17,20 @@ type Transaction struct {
 	Origin         string                     `json:"origin"`
 	CollectionMode string                     `json:"collection_mode"`
 	CreatedAt      time.Time                  `json:"created_at"`
+	BilledAt       *time.Time                 `json:"billed_at"`
 	CustomData     map[string]json.RawMessage `json:"custom_data"`
 	Details        struct {
+		Totals *struct {
+			GrandTotal string `json:"grand_total"`
+			Tax        string `json:"tax"`
+		} `json:"totals"`
 		LineItems []struct {
 			ID       string `json:"id"`
 			PriceID  string `json:"price_id"`
 			Quantity int64  `json:"quantity"`
 		} `json:"line_items"`
 	} `json:"details"`
+	InvoiceNumber string `json:"invoice_number"`
 	Checkout *struct {
 		URL string `json:"url"`
 	} `json:"checkout"`

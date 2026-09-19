@@ -4,6 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.5] - 2026-09-19
+
+Requires `github.com/data-insights-ai/rho-billing` v0.3.2.
+
+### Added
+
+- `Transaction.Total`, `Tax`, `BilledAt` and `InvoiceNumber`: what a billing
+  history needs to list a transaction.
+- `Client.InvoiceURL`: a short-lived link to the provider's invoice PDF.
+- `OriginAny` for `Transactions`: a customer's whole history, every origin,
+  where recovery scans keep to one.
+
 ## [0.3.4] - 2026-09-19
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.2.

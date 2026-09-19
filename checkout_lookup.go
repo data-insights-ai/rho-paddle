@@ -29,9 +29,14 @@ type TransactionPage struct {
 	NextAfter string
 }
 
+// OriginAny lists a customer's transactions of every origin: checkouts,
+// renewals, plan changes. It is what a billing history shows; recovery
+// scans keep to one origin.
+const OriginAny = "any"
+
 // Transactions lists transactions for one scoped customer. Empty Origin is
 // api (checkout recovery). Use origin=subscription_charge to recover one-off
-// subscription charges.
+// subscription charges, and OriginAny for a customer's whole history.
 // The cursor is treated as an opaque provider cursor value and is never
 // followed as a URL.
 func (c *Client) Transactions(ctx context.Context, query TransactionLookup) (TransactionPage, error) {
@@ -57,7 +62,7 @@ func (c *Client) Transactions(ctx context.Context, query TransactionLookup) (Tra
 		origin = "api"
 	}
 	switch origin {
-	case "api", "subscription_charge":
+	case "api", "subscription_charge", OriginAny:
 	default:
 		return TransactionPage{}, ErrInvalid
 	}
@@ -66,7 +71,9 @@ func (c *Client) Transactions(ctx context.Context, query TransactionLookup) (Tra
 	}
 	values := url.Values{}
 	values.Set("customer_id", query.Customer.ID)
-	values.Set("origin", origin)
+	if origin != OriginAny {
+		values.Set("origin", origin)
+	}
 	if origin == "api" {
 		values.Set("collection_mode", "automatic")
 	}
@@ -115,7 +122,7 @@ func (c *Client) Transactions(ctx context.Context, query TransactionLookup) (Tra
 	previous := query.After
 	for _, item := range wire.Data {
 		out, err := c.transaction(item)
-		if err != nil || out.Customer.ID != query.Customer.ID || out.Origin != origin || (origin == "api" && out.CollectionMode != CollectionAutomatic) || (previous != "" && out.Reference.ID <= previous) {
+		if err != nil || out.Customer.ID != query.Customer.ID || (origin != OriginAny && out.Origin != origin) || (origin == "api" && out.CollectionMode != CollectionAutomatic) || (previous != "" && out.Reference.ID <= previous) {
 			return TransactionPage{}, ErrResponse
 		}
 		if query.Subscription.ID != "" && out.Subscription.ID != query.Subscription.ID {

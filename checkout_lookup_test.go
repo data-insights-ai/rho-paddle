@@ -53,3 +53,39 @@ func TestTransactionsRejectsMissingPaginationEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestTransactionsOriginAnyAndTotals(t *testing.T) {
+	client := newClient(t, paddle.Sandbox, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("origin") != "" || req.URL.Query().Get("collection_mode") != "" {
+			t.Fatalf("OriginAny must not filter: %s", req.URL.RawQuery)
+		}
+		return jsonResponse(http.StatusOK, `{"data":[{"id":"`+testTxnID+`","customer_id":"`+testCustomerID+`","status":"completed","currency_code":"EUR","origin":"subscription_recurring","collection_mode":"automatic","created_at":"2026-09-16T08:00:00Z","billed_at":"2026-09-16T08:00:01Z","invoice_number":"INV-1","details":{"totals":{"grand_total":"5929","tax":"1029"},"line_items":[]}}],"meta":{"pagination":{"has_more":false,"next":""}}}`), nil
+	})
+	page, err := client.Transactions(t.Context(), paddle.TransactionLookup{Customer: billing.Reference{Scope: client.Scope(), ID: testCustomerID}, Origin: paddle.OriginAny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Origin != "subscription_recurring" || page.Items[0].Total != 5929 || page.Items[0].Tax != 1029 || page.Items[0].InvoiceNumber != "INV-1" || page.Items[0].BilledAt.IsZero() {
+		t.Fatalf("items=%#v", page.Items)
+	}
+}
+
+func TestInvoiceURL(t *testing.T) {
+	client := newClient(t, paddle.Sandbox, func(req *http.Request) (*http.Response, error) {
+		assertRequest(t, req, http.MethodGet, "https://sandbox-api.paddle.com/transactions/"+testTxnID+"/invoice?disposition=inline")
+		return jsonResponse(http.StatusOK, `{"data":{"url":"https://invoices.example.test/inv.pdf"}}`), nil
+	})
+	got, err := client.InvoiceURL(t.Context(), billing.Reference{Scope: client.Scope(), ID: testTxnID})
+	if err != nil || got != "https://invoices.example.test/inv.pdf" {
+		t.Fatalf("url=%q err=%v", got, err)
+	}
+	client = newClient(t, paddle.Sandbox, func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{"data":{"url":"http://insecure.example.test/inv.pdf"}}`), nil
+	})
+	if _, err := client.InvoiceURL(t.Context(), billing.Reference{Scope: client.Scope(), ID: testTxnID}); err == nil {
+		t.Fatal("non-https invoice link accepted")
+	}
+	if _, err := client.InvoiceURL(t.Context(), billing.Reference{Scope: client.Scope(), ID: "nope"}); err == nil {
+		t.Fatal("bad reference accepted")
+	}
+}

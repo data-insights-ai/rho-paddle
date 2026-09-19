@@ -148,6 +148,15 @@ type Transaction struct {
 	CollectionMode CollectionMode
 	CreatedAt      time.Time
 	Correlation    CheckoutCorrelation
+	// BilledAt is when the provider issued the invoice; zero before that.
+	BilledAt time.Time
+	// Total is the grand total in minor units (tax included) when the
+	// provider has computed it; zero for a draft without totals.
+	Total int64
+	// Tax is the tax part of Total in minor units.
+	Tax int64
+	// InvoiceNumber is the provider's invoice number once issued.
+	InvoiceNumber string
 }
 
 type TransactionItem struct {
@@ -270,6 +279,20 @@ func (c *Client) transaction(w paddlewire.Transaction) (Transaction, error) {
 		return Transaction{}, err
 	}
 	out.Correlation = correlation
+	if w.BilledAt != nil {
+		out.BilledAt = w.BilledAt.UTC()
+	}
+	out.InvoiceNumber = w.InvoiceNumber
+	if w.Details.Totals != nil && w.Details.Totals.GrandTotal != "" {
+		if out.Total, err = paddlewire.MinorUnits(w.Details.Totals.GrandTotal); err != nil {
+			return Transaction{}, ErrResponse
+		}
+		if w.Details.Totals.Tax != "" {
+			if out.Tax, err = paddlewire.MinorUnits(w.Details.Totals.Tax); err != nil {
+				return Transaction{}, ErrResponse
+			}
+		}
+	}
 	if w.Checkout != nil && w.Checkout.URL != "" {
 		if !paddlewire.HTTPSURL(w.Checkout.URL) {
 			return Transaction{}, ErrResponse
@@ -308,6 +331,27 @@ func parseCorrelation(raw map[string]json.RawMessage) (CheckoutCorrelation, erro
 		return CheckoutCorrelation{}, ErrResponse
 	}
 	return out, nil
+}
+
+// InvoiceURL returns a short-lived link to the provider's invoice PDF for a
+// transaction, for the browser to open. The provider issues invoices for
+// completed (or, when collected manually, billed) transactions with a
+// non-zero total; anything else is an error from the provider. The link
+// expires within the hour and must not be stored.
+func (c *Client) InvoiceURL(ctx context.Context, ref billing.Reference) (string, error) {
+	if c == nil || ref.Scope != c.scope || !paddlewire.ID(ref.ID, "txn_") {
+		return "", ErrInvalid
+	}
+	var wire struct {
+		URL string `json:"url"`
+	}
+	if err := c.request(ctx, http.MethodGet, "/transactions/"+ref.ID+"/invoice?disposition=inline", nil, &wire); err != nil {
+		return "", err
+	}
+	if !paddlewire.HTTPSURL(wire.URL) {
+		return "", ErrResponse
+	}
+	return wire.URL, nil
 }
 
 // PortalSession is an ephemeral authenticated handoff. Do not persist or log its
