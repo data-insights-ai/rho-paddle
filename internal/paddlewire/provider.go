@@ -31,7 +31,7 @@ type Transaction struct {
 		} `json:"line_items"`
 	} `json:"details"`
 	InvoiceNumber string `json:"invoice_number"`
-	Checkout *struct {
+	Checkout      *struct {
 		URL string `json:"url"`
 	} `json:"checkout"`
 }
