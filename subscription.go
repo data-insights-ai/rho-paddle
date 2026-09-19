@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/data-insights-ai/rho-paddle/internal/paddlewire"
 	"net/http"
+	"strings"
 	"time"
 
 	billing "github.com/data-insights-ai/rho-billing"
@@ -210,13 +211,16 @@ func (c *Client) PreviewSubscriptionUpdate(ctx context.Context, in SubscriptionU
 		if wire.UpdateSummary.Result.CurrencyCode != "" {
 			out.Currency = wire.UpdateSummary.Result.CurrencyCode
 		}
+		// The provider states the credit component as a negative amount;
+		// both components are reported here as magnitudes, since Action
+		// already says which way the net goes.
 		if wire.UpdateSummary.Charge.Amount != "" {
-			if out.Charge, err = paddlewire.MinorUnits(wire.UpdateSummary.Charge.Amount); err != nil {
+			if out.Charge, err = signedMinorUnits(wire.UpdateSummary.Charge.Amount); err != nil {
 				return SubscriptionPreview{}, ErrResponse
 			}
 		}
 		if wire.UpdateSummary.Credit.Amount != "" {
-			if out.Credit, err = paddlewire.MinorUnits(wire.UpdateSummary.Credit.Amount); err != nil {
+			if out.Credit, err = signedMinorUnits(wire.UpdateSummary.Credit.Amount); err != nil {
 				return SubscriptionPreview{}, ErrResponse
 			}
 		}
@@ -260,4 +264,16 @@ func (c *Client) subscriptionUpdateRequest(in SubscriptionUpdate) (any, error) {
 		Items                []item `json:"items"`
 		ProrationBillingMode string `json:"proration_billing_mode"`
 	}{items, string(in.Proration)}, nil
+}
+
+// signedMinorUnits parses an amount that may carry a leading minus and
+// returns its magnitude.
+func signedMinorUnits(value string) (int64, error) {
+	negative := strings.HasPrefix(value, "-")
+	amount, err := paddlewire.MinorUnits(strings.TrimPrefix(value, "-"))
+	if err != nil {
+		return 0, err
+	}
+	_ = negative
+	return amount, nil
 }

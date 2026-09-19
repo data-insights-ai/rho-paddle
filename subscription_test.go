@@ -65,7 +65,7 @@ func TestPreviewSubscriptionUpdateWireMapping(t *testing.T) {
 		if body.Proration != "prorated_immediately" || len(body.Items) != 1 || body.Items[0].PriceID != testPriceID {
 			t.Fatalf("body=%#v", body)
 		}
-		return jsonResponse(http.StatusOK, `{"data":{"currency_code":"EUR","next_billed_at":"2026-10-19T07:07:20Z","update_summary":{"result":{"action":"charge","amount":"12345","currency_code":"EUR"},"charge":{"amount":"20000","currency_code":"EUR"},"credit":{"amount":"7655","currency_code":"EUR"}},"recurring_transaction_details":{"totals":{"total":"49900"}}}}`), nil
+		return jsonResponse(http.StatusOK, `{"data":{"currency_code":"EUR","next_billed_at":"2026-10-19T07:07:20Z","update_summary":{"result":{"action":"charge","amount":"12345","currency_code":"EUR"},"charge":{"amount":"20000","currency_code":"EUR"},"credit":{"amount":"-7655","currency_code":"EUR"}},"recurring_transaction_details":{"totals":{"total":"49900"}}}}`), nil
 	})
 	got, err := client.PreviewSubscriptionUpdate(t.Context(), paddle.SubscriptionUpdate{
 		Subscription: billing.Reference{Scope: client.Scope(), ID: testSubID},

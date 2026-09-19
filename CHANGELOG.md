@@ -4,6 +4,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.6] - 2026-09-19
+
+### Fixed
+
+- `PreviewSubscriptionUpdate` rejected every preview that carried a credit:
+  the provider states the credit component as a negative amount. Charge and
+  credit are reported as magnitudes; `Action` says which way the net goes.
+
 ## [0.3.5] - 2026-09-19
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.2.
