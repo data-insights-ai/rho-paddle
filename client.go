@@ -265,7 +265,9 @@ func (c *Client) transaction(w paddlewire.Transaction) (Transaction, error) {
 	out.Items = make([]TransactionItem, 0, len(w.Details.LineItems))
 	for _, item := range w.Details.LineItems {
 		priceID := item.PriceID
-		if !paddlewire.ID(item.ID, "txnitm_") || !paddlewire.ID(priceID, "pri_") || item.Quantity <= 0 {
+		// A prorated change carries the credited old item with a negative
+		// quantity; only zero is meaningless.
+		if !paddlewire.ID(item.ID, "txnitm_") || !paddlewire.ID(priceID, "pri_") || item.Quantity == 0 {
 			return Transaction{}, ErrResponse
 		}
 		if _, ok := seen[item.ID]; ok {

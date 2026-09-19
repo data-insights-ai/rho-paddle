@@ -4,6 +4,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.7] - 2026-09-19
+
+### Fixed
+
+- `Transaction` and `Transactions` rejected a prorated plan change: the
+  provider lists the credited old item with a negative quantity, and the
+  decoder treated any non-positive quantity as an invalid response. A whole
+  billing history disappeared behind one such transaction. Only a zero
+  quantity is refused now.
+
 ## [0.3.6] - 2026-09-19
 
 ### Fixed

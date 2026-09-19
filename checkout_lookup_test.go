@@ -89,3 +89,24 @@ func TestInvoiceURL(t *testing.T) {
 		t.Fatal("bad reference accepted")
 	}
 }
+
+// A prorated plan change credits the old item with a negative quantity; it
+// must decode, or the customer's whole history vanishes behind it.
+func TestTransactionsAcceptProrationCreditLines(t *testing.T) {
+	client := newClient(t, paddle.Sandbox, func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{"data":[{"id":"`+testTxnID+`","customer_id":"`+testCustomerID+`","status":"completed","currency_code":"EUR","origin":"subscription_update","collection_mode":"automatic","created_at":"2026-09-16T08:00:00Z","details":{"totals":{"grand_total":"54407","tax":"9442"},"line_items":[{"id":"txnitm_0123456789abcdefghijklmnop","price_id":"`+testPriceID+`","quantity":1},{"id":"txnitm_zyxwvutsrqponmlkjihgfedcba","price_id":"pri_zyxwvutsrqponmlkjihgfedcba","quantity":-1}]}}],"meta":{"pagination":{"has_more":false,"next":""}}}`), nil
+	})
+	page, err := client.Transactions(t.Context(), paddle.TransactionLookup{Customer: billing.Reference{Scope: client.Scope(), ID: testCustomerID}, Origin: paddle.OriginAny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Items) != 2 || page.Items[0].Items[1].Quantity != -1 || page.Items[0].Total != 54407 {
+		t.Fatalf("items=%#v", page.Items)
+	}
+	client = newClient(t, paddle.Sandbox, func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{"data":{"id":"`+testTxnID+`","customer_id":"`+testCustomerID+`","status":"ready","currency_code":"EUR","origin":"api","collection_mode":"automatic","created_at":"2026-09-16T08:00:00Z","details":{"line_items":[{"id":"txnitm_0123456789abcdefghijklmnop","price_id":"`+testPriceID+`","quantity":0}]}}}`), nil
+	})
+	if _, err := client.Transaction(t.Context(), billing.Reference{Scope: client.Scope(), ID: testTxnID}); err == nil {
+		t.Fatal("a zero quantity line accepted")
+	}
+}
