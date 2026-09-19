@@ -4,6 +4,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.3.4] - 2026-09-19
+
+Requires `github.com/data-insights-ai/rho-billing` v0.3.2.
+
+### Added
+
+- `Client.PreviewSubscriptionUpdate`: what `UpdateSubscription` with the same
+  input would charge or credit now, and what recurs afterwards, without
+  applying it. A host shows this before asking the customer to confirm a
+  plan change. The update and its preview share one request builder.
+
 ## [0.3.3] - 2026-09-19
 
 Requires `github.com/data-insights-ai/rho-billing` v0.3.2.

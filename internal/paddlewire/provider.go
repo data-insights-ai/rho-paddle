@@ -98,3 +98,29 @@ type NotificationSetting struct {
 type CheckoutPage struct {
 	URL string `json:"url"`
 }
+
+// Money is an amount with its currency, as the provider states totals.
+type Money struct {
+	Amount       string `json:"amount"`
+	CurrencyCode string `json:"currency_code"`
+}
+
+// SubscriptionPreview is the provider's answer to a previewed update.
+type SubscriptionPreview struct {
+	CurrencyCode  string `json:"currency_code"`
+	NextBilledAt  string `json:"next_billed_at"`
+	UpdateSummary *struct {
+		Result struct {
+			Action       string `json:"action"`
+			Amount       string `json:"amount"`
+			CurrencyCode string `json:"currency_code"`
+		} `json:"result"`
+		Charge Money `json:"charge"`
+		Credit Money `json:"credit"`
+	} `json:"update_summary"`
+	RecurringTransactionDetails *struct {
+		Totals struct {
+			Total string `json:"total"`
+		} `json:"totals"`
+	} `json:"recurring_transaction_details"`
+}

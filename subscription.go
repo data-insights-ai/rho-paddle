@@ -148,29 +148,10 @@ func parseProviderTime(raw string) (time.Time, error) {
 }
 
 func (c *Client) UpdateSubscription(ctx context.Context, in SubscriptionUpdate) (Subscription, error) {
-	if c == nil || in.Subscription.Scope != c.scope || !paddlewire.ID(in.Subscription.ID, "sub_") || len(in.Items) == 0 || len(in.Items) > 100 {
-		return Subscription{}, ErrInvalid
+	request, err := c.subscriptionUpdateRequest(in)
+	if err != nil {
+		return Subscription{}, err
 	}
-	switch in.Proration {
-	case ProrationProratedImmediately, ProrationProratedNextPeriod, ProrationFullImmediately, ProrationFullNextPeriod, ProrationDoNotBill:
-	default:
-		return Subscription{}, ErrInvalid
-	}
-	type item struct {
-		PriceID  string `json:"price_id"`
-		Quantity int64  `json:"quantity"`
-	}
-	items := make([]item, len(in.Items))
-	for i, line := range in.Items {
-		if line.Price.Scope != c.scope || !paddlewire.ID(line.Price.ID, "pri_") || line.Quantity <= 0 {
-			return Subscription{}, ErrInvalid
-		}
-		items[i] = item{PriceID: line.Price.ID, Quantity: line.Quantity}
-	}
-	request := struct {
-		Items                []item `json:"items"`
-		ProrationBillingMode string `json:"proration_billing_mode"`
-	}{items, string(in.Proration)}
 	var wire paddlewire.Subscription
 	if err := c.request(ctx, http.MethodPatch, "/subscriptions/"+in.Subscription.ID, request, &wire); err != nil {
 		return Subscription{}, err
@@ -180,4 +161,103 @@ func (c *Client) UpdateSubscription(ctx context.Context, in SubscriptionUpdate) 
 		return Subscription{}, errors.Join(ErrResponse, ErrUncertain)
 	}
 	return out, nil
+}
+
+// SubscriptionPreview is what a proposed update would do to the money:
+// what is charged or credited now, and what recurs afterwards. Nothing is
+// applied.
+type SubscriptionPreview struct {
+	// Action is "charge", "credit" or "" when nothing is due now.
+	Action string
+	// Amount is the immediate charge or credit in minor units, always
+	// non-negative; Action says which.
+	Amount   int64
+	Currency string
+	// Charge and Credit are the gross components the provider computed
+	// before netting them into Amount.
+	Charge, Credit int64
+	// NextBilledAt is when the subscription bills next after the change.
+	NextBilledAt time.Time
+	// RecurringAmount is the total of each renewal after the change, in
+	// minor units, when the provider reports it.
+	RecurringAmount int64
+}
+
+// PreviewSubscriptionUpdate asks the provider what UpdateSubscription with
+// the same input would charge or credit, without applying it. A host shows
+// this before it asks the customer to confirm a change.
+func (c *Client) PreviewSubscriptionUpdate(ctx context.Context, in SubscriptionUpdate) (SubscriptionPreview, error) {
+	request, err := c.subscriptionUpdateRequest(in)
+	if err != nil {
+		return SubscriptionPreview{}, err
+	}
+	var wire paddlewire.SubscriptionPreview
+	if err := c.request(ctx, http.MethodPatch, "/subscriptions/"+in.Subscription.ID+"/preview", request, &wire); err != nil {
+		return SubscriptionPreview{}, err
+	}
+	out := SubscriptionPreview{Currency: wire.CurrencyCode}
+	if wire.UpdateSummary != nil {
+		switch wire.UpdateSummary.Result.Action {
+		case "charge", "credit":
+			out.Action = wire.UpdateSummary.Result.Action
+		case "":
+		default:
+			return SubscriptionPreview{}, ErrResponse
+		}
+		if out.Amount, err = paddlewire.MinorUnits(wire.UpdateSummary.Result.Amount); err != nil {
+			return SubscriptionPreview{}, ErrResponse
+		}
+		if wire.UpdateSummary.Result.CurrencyCode != "" {
+			out.Currency = wire.UpdateSummary.Result.CurrencyCode
+		}
+		if wire.UpdateSummary.Charge.Amount != "" {
+			if out.Charge, err = paddlewire.MinorUnits(wire.UpdateSummary.Charge.Amount); err != nil {
+				return SubscriptionPreview{}, ErrResponse
+			}
+		}
+		if wire.UpdateSummary.Credit.Amount != "" {
+			if out.Credit, err = paddlewire.MinorUnits(wire.UpdateSummary.Credit.Amount); err != nil {
+				return SubscriptionPreview{}, ErrResponse
+			}
+		}
+	}
+	if wire.NextBilledAt != "" {
+		if out.NextBilledAt, err = parseProviderTime(wire.NextBilledAt); err != nil {
+			return SubscriptionPreview{}, ErrResponse
+		}
+	}
+	if wire.RecurringTransactionDetails != nil && wire.RecurringTransactionDetails.Totals.Total != "" {
+		if out.RecurringAmount, err = paddlewire.MinorUnits(wire.RecurringTransactionDetails.Totals.Total); err != nil {
+			return SubscriptionPreview{}, ErrResponse
+		}
+	}
+	return out, nil
+}
+
+// subscriptionUpdateRequest validates an update and shapes it for the wire;
+// shared by the update and its preview so the two cannot drift.
+func (c *Client) subscriptionUpdateRequest(in SubscriptionUpdate) (any, error) {
+	if c == nil || in.Subscription.Scope != c.scope || !paddlewire.ID(in.Subscription.ID, "sub_") || len(in.Items) == 0 || len(in.Items) > 100 {
+		return nil, ErrInvalid
+	}
+	switch in.Proration {
+	case ProrationProratedImmediately, ProrationProratedNextPeriod, ProrationFullImmediately, ProrationFullNextPeriod, ProrationDoNotBill:
+	default:
+		return nil, ErrInvalid
+	}
+	type item struct {
+		PriceID  string `json:"price_id"`
+		Quantity int64  `json:"quantity"`
+	}
+	items := make([]item, len(in.Items))
+	for i, line := range in.Items {
+		if line.Price.Scope != c.scope || !paddlewire.ID(line.Price.ID, "pri_") || line.Quantity <= 0 {
+			return nil, ErrInvalid
+		}
+		items[i] = item{PriceID: line.Price.ID, Quantity: line.Quantity}
+	}
+	return struct {
+		Items                []item `json:"items"`
+		ProrationBillingMode string `json:"proration_billing_mode"`
+	}{items, string(in.Proration)}, nil
 }
