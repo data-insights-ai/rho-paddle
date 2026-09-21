@@ -1,5 +1,5 @@
-github.com/data-insights-ai/rho-billing v0.3.2 h1:nBkH2mB4J+ggyxbvStGf3ZIo9HyrruQVNieR9VGBTtk=
-github.com/data-insights-ai/rho-billing v0.3.2/go.mod h1:BUFBnqGjVUqLoSuTQBM7sPAOvZwamNxUBncPMJReWc8=
+github.com/data-insights-ai/rho-billing v0.3.4 h1:vZ+OU8Gb9AripgyLmIasUkW1RgCGnz/358Kb/05Q0rs=
+github.com/data-insights-ai/rho-billing v0.3.4/go.mod h1:BUFBnqGjVUqLoSuTQBM7sPAOvZwamNxUBncPMJReWc8=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
