@@ -99,8 +99,12 @@ func TestNormalizePaymentAcceptsTheTransactionThatFailedInProduction(t *testing.
 	}
 }
 
-// Relaxing a check is only safe if you show what it still catches.
-func TestNormalizePaymentRefusesAnUnexplainedShortfall(t *testing.T) {
+// The provider is the authority on money, so its total is recorded as
+// given even when it differs from the quote we showed beforehand. What is
+// still refused is a payload that contradicts itself: those numbers we
+// cannot read at all, and reading them wrongly would put a figure in the
+// ledger that nobody ever charged.
+func TestNormalizePaymentRefusesOnlyAContradictoryPayload(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(5 * time.Minute)}
 
@@ -110,20 +114,16 @@ func TestNormalizePaymentRefusesAnUnexplainedShortfall(t *testing.T) {
 		lineSubtotal, lineDiscount           string
 	}{
 		{
-			name:     "collected less than quoted with no discount",
-			subtotal: "100", total: "60", discount: "0", lineTotal: "60", lineSubtotal: "100", lineDiscount: "0",
-		},
-		{
-			name:     "discount does not explain the gap",
-			subtotal: "100", total: "20", discount: "30", lineTotal: "20", lineSubtotal: "100", lineDiscount: "30",
-		},
-		{
-			name:     "line discount disagrees with the total",
+			name:     "line discount disagrees with the transaction discount",
 			subtotal: "100", total: "50", discount: "50", lineTotal: "50", lineSubtotal: "100", lineDiscount: "10",
 		},
 		{
 			name:     "discount larger than the list price",
 			subtotal: "100", total: "0", discount: "150", lineTotal: "0", lineSubtotal: "100", lineDiscount: "150",
+		},
+		{
+			name:     "totals do not follow the provider's own arithmetic",
+			subtotal: "100", total: "20", discount: "30", lineTotal: "20", lineSubtotal: "100", lineDiscount: "30",
 		},
 	}
 	for _, c := range cases {
@@ -255,4 +255,37 @@ func exclusivePaymentFixture(t *testing.T, now time.Time) (purchase.CollectionBi
 		Quantity: 1, Allocations: []purchase.CollectionAllocation{{QuoteLineID: "line", Quantity: 1}},
 	})
 	return binding, intent, quote
+}
+
+// A provider total that simply differs from our quote is recorded, not
+// refused. Our quote is what we showed beforehand; the provider is what
+// actually charged, and the customer agreed to its figure. Taking their
+// purchase away over our own bookkeeping is the one outcome nobody wants.
+func TestNormalizePaymentRecordsATotalThatDiffersFromTheQuote(t *testing.T) {
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}
+	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
+	if quote.Lines[0].Amount != 100 {
+		t.Fatalf("fixture quote is %d", quote.Lines[0].Amount)
+	}
+
+	// Quoted 100, the provider collected 60 and reports no discount.
+	wire := paymentWireFixture(binding, "completed", "60", "0", "0", "0", "60", "0", "USD",
+		[]paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "60", "0", "", ""}})
+	wire.Payments = append(wire.Payments, paymentAttemptFixture(
+		"11111111-1111-4111-8111-111111111111", "captured", "60", now, new(now.Add(time.Second))))
+
+	fact, _, err := normalizePayment(event, wire, binding, intent, quote)
+	if err != nil {
+		t.Fatalf("a total that differs from the quote must still be recorded: %v", err)
+	}
+	if fact.Gross != 60 {
+		t.Fatalf("gross = %d, want the 60 the provider collected", fact.Gross)
+	}
+	if len(fact.Lines) != 1 || fact.Lines[0].Gross != 60 {
+		t.Fatalf("lines = %+v, want the collected amount", fact.Lines)
+	}
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("fact invalid: %v", err)
+	}
 }

@@ -49,7 +49,18 @@ func TestCollectionTaxAllocationUsesExactLargeProductsAndStableTies(t *testing.T
 	if got[0].Tax != math.MaxInt64/2 || got[1].Tax != math.MaxInt64/2-1 {
 		t.Fatalf("large exact/tied allocation=%+v", got)
 	}
-	if _, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-2, 1, 0); err == nil {
-		t.Fatal("changed commercial total accepted")
+	// A total that differs from the quote is recorded rather than refused:
+	// the provider is the authority on what it collected, and our quote is
+	// only what we showed beforehand.
+	differing, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-2, 1, 0)
+	if err != nil {
+		t.Fatalf("a differing total must still allocate: %v", err)
+	}
+	var total int64
+	for _, l := range differing {
+		total += l.Gross
+	}
+	if total != math.MaxInt64-2 {
+		t.Fatalf("allocated %d, want the %d collected", total, int64(math.MaxInt64-2))
 	}
 }

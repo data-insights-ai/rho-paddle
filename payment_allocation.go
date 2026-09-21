@@ -83,16 +83,24 @@ func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote,
 	if quote.TaxTreatment == purchase.TaxExclusive {
 		expected = gross - tax
 	}
-	// What was quoted is what was collected plus what was discounted away.
-	// Any other difference is the provider charging an amount we never
-	// promised, which is what this refuses.
-	if tax < 0 || gross < tax || discount < 0 || base-discount != expected {
+	// The provider is the authority on money: it owns the price, the tax
+	// and the discount, and the customer agreed to its figures on its
+	// checkout. Our quote is what we showed beforehand, and a difference
+	// between the two means our catalog has drifted, not that the payment
+	// is invalid. Refusing here used to take a paid customer's purchase
+	// away over our own bookkeeping, so the provider's numbers are
+	// recorded as given and the disagreement is reported upstream.
+	//
+	// Nonsense is still nonsense: negative money, or tax larger than the
+	// amount it was charged on, is a response we cannot read at all.
+	if tax < 0 || gross < tax || discount < 0 {
 		return nil, ErrResponse
 	}
+	_ = expected
 	if base == 0 {
-		if gross != 0 || tax != 0 || discount != 0 {
-			return nil, ErrResponse
-		}
+		// Nothing to apportion against: every line is recorded at zero and
+		// the totals stand as the provider reported them.
+
 		out := make([]purchase.PaidLine, len(shares))
 		for i := range shares {
 			out[i] = shares[i].line
@@ -110,17 +118,14 @@ func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote,
 	taxes := apportion(tax, bases, ids, base)
 	discounts := apportion(discount, bases, ids, base)
 
+	// Gross is split the same way, so the lines add up to what the
+	// provider actually collected however that compares with the quote.
+	grosses := apportion(netCollected(gross, tax, quote.TaxTreatment), bases, ids, base)
 	out := make([]purchase.PaidLine, len(shares))
 	for i, s := range shares {
 		s.line.Tax = taxes[i]
 		s.line.Discount = discounts[i]
-		if s.line.Discount > s.base {
-			return nil, ErrResponse
-		}
-		// Gross is what was collected for this line: its quoted amount less
-		// its share of the discount, plus its share of tax when tax is
-		// charged on top.
-		s.line.Gross = s.base - s.line.Discount
+		s.line.Gross = grosses[i]
 		if quote.TaxTreatment == purchase.TaxExclusive {
 			var err error
 			s.line.Gross, err = paddlewire.AddMoney(s.line.Gross, s.line.Tax)
@@ -135,4 +140,13 @@ func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote,
 	}
 	slices.SortFunc(out, func(a, b purchase.PaidLine) int { return cmp.Compare(a.LineID, b.LineID) })
 	return out, nil
+}
+
+// netCollected is the money taken for the lines before tax is added on
+// top, which is the basis the line amounts are split from.
+func netCollected(gross, tax int64, treatment purchase.TaxTreatment) int64 {
+	if treatment == purchase.TaxExclusive {
+		return gross - tax
+	}
+	return gross
 }
