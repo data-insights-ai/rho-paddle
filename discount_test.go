@@ -65,6 +65,38 @@ func TestNormalizePaymentAcceptsADiscountedTransaction(t *testing.T) {
 	}
 }
 
+// The exact shape that failed in production: a full discount, a zero
+// total, and a payment attempt that was authorised and never captured
+// because there was nothing to capture. Written from the stored payload
+// rather than from imagination.
+func TestNormalizePaymentAcceptsTheTransactionThatFailedInProduction(t *testing.T) {
+	now := time.Date(2026, 9, 21, 17, 51, 15, 0, time.UTC)
+	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(2 * time.Second)}
+	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
+
+	wire := paymentWireFixture(binding, "completed", "0", "0", "0", "0", "0", "0", "USD",
+		[]paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "0", "0", "100", "100"}})
+	wire.Details.Totals.Subtotal, wire.Details.Totals.Discount = "100", "100"
+	// Authorised, never captured: Paddle records the attempt even when the
+	// amount owed is nothing.
+	wire.Payments = append(wire.Payments, paymentAttemptFixture(
+		"11111111-1111-4111-8111-111111111111", "authorized", "0", now.Add(time.Second), nil))
+
+	fact, _, err := normalizePayment(event, wire, binding, intent, quote)
+	if err != nil {
+		t.Fatalf("the transaction that failed in production still fails: %v", err)
+	}
+	if fact.Gross != 0 || fact.Discount != 100 {
+		t.Fatalf("gross %d discount %d", fact.Gross, fact.Discount)
+	}
+	if !fact.CollectedAt.Equal(event.OccurredAt) {
+		t.Fatalf("collected at %v, want the event time", fact.CollectedAt)
+	}
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("fact invalid: %v", err)
+	}
+}
+
 // Relaxing a check is only safe if you show what it still catches.
 func TestNormalizePaymentRefusesAnUnexplainedShortfall(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
