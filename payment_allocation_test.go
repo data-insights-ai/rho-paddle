@@ -23,12 +23,12 @@ func TestCollectionTaxAllocationPreservesCommercialBasis(t *testing.T) {
 				want[0].Gross = 135
 				want[1].Gross = 271
 			}
-			got, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), gross, 31)
+			got, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), gross, 31, 0)
 			if err != nil || !slices.Equal(got, want) {
 				t.Fatalf("allocation=%+v err=%v want=%+v", got, err, want)
 			}
 			slices.Reverse(line.Allocations)
-			again, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), gross, 31)
+			again, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), gross, 31, 0)
 			if err != nil || !slices.Equal(again, want) {
 				t.Fatalf("reordered=%+v err=%v", again, err)
 			}
@@ -42,14 +42,14 @@ func TestCollectionTaxAllocationUsesExactLargeProductsAndStableTies(t *testing.T
 		{QuoteLineInput: purchase.QuoteLineInput{ID: "b", Quantity: 1}, Amount: math.MaxInt64 / 2},
 	}}
 	line := purchase.CollectionLine{Quantity: 2, Allocations: []purchase.CollectionAllocation{{QuoteLineID: "b", Quantity: 1}, {QuoteLineID: "a", Quantity: 1}}}
-	got, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-1, math.MaxInt64-2)
+	got, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-1, math.MaxInt64-2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got[0].Tax != math.MaxInt64/2 || got[1].Tax != math.MaxInt64/2-1 {
 		t.Fatalf("large exact/tied allocation=%+v", got)
 	}
-	if _, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-2, 1); err == nil {
+	if _, err := allocateCollectionMoney(line, quote, quoteLineIndex(quote), math.MaxInt64-2, 1, 0); err == nil {
 		t.Fatal("changed commercial total accepted")
 	}
 }

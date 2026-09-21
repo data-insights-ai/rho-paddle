@@ -23,11 +23,47 @@ func quoteLineIndex(quote purchase.Quote) map[string]purchase.QuoteLine {
 	return byID
 }
 
-func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote, byID map[string]purchase.QuoteLine, gross, tax int64) ([]purchase.PaidLine, error) {
-	type share struct {
-		line      purchase.PaidLine
-		base      int64
+// apportion splits total across the bases in proportion to each base,
+// giving the leftover cents to the largest remainders and breaking ties by
+// line id so the result does not depend on map order. It is used for tax
+// and for discount, which are the two amounts the provider reports for the
+// whole line rather than per quote line.
+func apportion(total int64, bases []int64, ids []string, base int64) []int64 {
+	out := make([]int64, len(bases))
+	if total == 0 || base == 0 {
+		return out
+	}
+	type leftover struct {
+		index     int
 		remainder *big.Int
+		id        string
+	}
+	leftovers := make([]leftover, len(bases))
+	var assigned int64
+	for i := range bases {
+		product := new(big.Int).Mul(big.NewInt(total), big.NewInt(bases[i]))
+		quotient, remainder := new(big.Int), new(big.Int)
+		quotient.QuoRem(product, big.NewInt(base), remainder)
+		out[i] = quotient.Int64()
+		leftovers[i] = leftover{index: i, remainder: remainder, id: ids[i]}
+		assigned += out[i]
+	}
+	slices.SortFunc(leftovers, func(a, b leftover) int {
+		if c := b.remainder.Cmp(a.remainder); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.id, b.id)
+	})
+	for i := int64(0); i < total-assigned && i < int64(len(leftovers)); i++ {
+		out[leftovers[i].index]++
+	}
+	return out
+}
+
+func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote, byID map[string]purchase.QuoteLine, gross, tax, discount int64) ([]purchase.PaidLine, error) {
+	type share struct {
+		line purchase.PaidLine
+		base int64
 	}
 	shares := make([]share, 0, len(line.Allocations))
 	var base int64
@@ -47,11 +83,14 @@ func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote,
 	if quote.TaxTreatment == purchase.TaxExclusive {
 		expected = gross - tax
 	}
-	if base != expected || tax < 0 || gross < tax {
+	// What was quoted is what was collected plus what was discounted away.
+	// Any other difference is the provider charging an amount we never
+	// promised, which is what this refuses.
+	if tax < 0 || gross < tax || discount < 0 || base-discount != expected {
 		return nil, ErrResponse
 	}
 	if base == 0 {
-		if gross != 0 || tax != 0 {
+		if gross != 0 || tax != 0 || discount != 0 {
 			return nil, ErrResponse
 		}
 		out := make([]purchase.PaidLine, len(shares))
@@ -61,30 +100,30 @@ func allocateCollectionMoney(line purchase.CollectionLine, quote purchase.Quote,
 		slices.SortFunc(out, func(a, b purchase.PaidLine) int { return cmp.Compare(a.LineID, b.LineID) })
 		return out, nil
 	}
-	var assigned int64
+	bases := make([]int64, len(shares))
+	ids := make([]string, len(shares))
 	for i := range shares {
-		product := new(big.Int).Mul(big.NewInt(tax), big.NewInt(shares[i].base))
-		quotient, remainder := new(big.Int), new(big.Int)
-		quotient.QuoRem(product, big.NewInt(base), remainder)
-		shares[i].line.Tax = quotient.Int64()
-		shares[i].remainder = remainder
-		assigned += shares[i].line.Tax
+		bases[i], ids[i] = shares[i].base, shares[i].line.LineID
 	}
-	slices.SortFunc(shares, func(a, b share) int {
-		if c := b.remainder.Cmp(a.remainder); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.line.LineID, b.line.LineID)
-	})
-	for i := int64(0); i < tax-assigned; i++ {
-		shares[i].line.Tax++
-	}
+	// Both are apportioned before anything is reordered, so the two splits
+	// see the same order and neither depends on the other's sort.
+	taxes := apportion(tax, bases, ids, base)
+	discounts := apportion(discount, bases, ids, base)
+
 	out := make([]purchase.PaidLine, len(shares))
 	for i, s := range shares {
-		s.line.Gross = s.base
+		s.line.Tax = taxes[i]
+		s.line.Discount = discounts[i]
+		if s.line.Discount > s.base {
+			return nil, ErrResponse
+		}
+		// Gross is what was collected for this line: its quoted amount less
+		// its share of the discount, plus its share of tax when tax is
+		// charged on top.
+		s.line.Gross = s.base - s.line.Discount
 		if quote.TaxTreatment == purchase.TaxExclusive {
 			var err error
-			s.line.Gross, err = paddlewire.AddMoney(s.base, s.line.Tax)
+			s.line.Gross, err = paddlewire.AddMoney(s.line.Gross, s.line.Tax)
 			if err != nil {
 				return nil, err
 			}

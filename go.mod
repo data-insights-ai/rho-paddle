@@ -3,7 +3,7 @@ module github.com/data-insights-ai/rho-paddle
 go 1.26.0
 
 require (
-	github.com/data-insights-ai/rho-billing v0.3.2
+	github.com/data-insights-ai/rho-billing v0.3.3
 	github.com/jackc/pgx/v5 v5.11.0
 )
 

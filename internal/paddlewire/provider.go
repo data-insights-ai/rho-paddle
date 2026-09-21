@@ -54,6 +54,22 @@ type Subscription struct {
 	} `json:"scheduled_change"`
 }
 
+// PaymentLine is one line of a transaction. It is named rather than
+// anonymous so that a caller can build one without restating the whole
+// shape, which is how adding a field here used to break every test that
+// constructed a transaction by hand.
+type PaymentLine struct {
+	ID       string `json:"id"`
+	PriceID  string `json:"price_id"`
+	Quantity int64  `json:"quantity"`
+	Totals   struct {
+		Subtotal string `json:"subtotal"`
+		Discount string `json:"discount"`
+		Total    string `json:"total"`
+		Tax      string `json:"tax"`
+	} `json:"totals"`
+}
+
 type Payment struct {
 	ID         string `json:"id"`
 	CustomerID string `json:"customer_id"`
@@ -61,6 +77,11 @@ type Payment struct {
 	Currency   string `json:"currency_code"`
 	Details    struct {
 		Totals struct {
+			// Subtotal is before tax and before any discount; Discount is
+			// what the provider took off. Total is subtotal minus discount
+			// plus tax, which is what the customer owes.
+			Subtotal        string `json:"subtotal"`
+			Discount        string `json:"discount"`
 			Total           string `json:"total"`
 			Tax             string `json:"tax"`
 			Credit          string `json:"credit"`
@@ -69,15 +90,7 @@ type Payment struct {
 			Balance         string `json:"balance"`
 			Currency        string `json:"currency_code"`
 		} `json:"totals"`
-		Lines []struct {
-			ID       string `json:"id"`
-			PriceID  string `json:"price_id"`
-			Quantity int64  `json:"quantity"`
-			Totals   struct {
-				Total string `json:"total"`
-				Tax   string `json:"tax"`
-			} `json:"totals"`
-		} `json:"line_items"`
+		Lines []PaymentLine `json:"line_items"`
 	} `json:"details"`
 	Payments []struct {
 		ID         string     `json:"payment_attempt_id"`

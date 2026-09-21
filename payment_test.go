@@ -16,7 +16,7 @@ func TestNormalizePaymentTaxCreditEquationAndLatestCapture(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(5 * time.Minute)}
 	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
-	wire := paymentWireFixture(binding, "completed", "100", "20", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "20"}})
+	wire := paymentWireFixture(binding, "completed", "100", "20", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "20", "", ""}})
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("11111111-1111-4111-8111-111111111111", "captured", "45", now.Add(time.Minute), new(now.Add(2*time.Minute))))
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("22222222-2222-4222-8222-222222222222", "captured", "55", now.Add(2*time.Minute), new(now.Add(4*time.Minute))))
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("33333333-3333-4333-8333-333333333333", "captured", "0", now.Add(2*time.Minute), new(now.Add(4*time.Minute))))
@@ -64,8 +64,8 @@ func TestNormalizePaymentUsesLatestCaptureAndRejectsOverflow(t *testing.T) {
 	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(10 * time.Minute)}
 	binding, intent, quote := paymentNormalizationFixture(t, now, 2)
 	wire := paymentWireFixture(binding, "completed", "101", "0", "0", "0", "101", "0", "USD", []paymentLineFixture{
-		{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "9223372036854775807", "0"},
-		{"txnitm_zyxwvutsrqponmlkjihgfedcba", "pri_zyxwvutsrqponmlkjihgfedcba", 1, "1", "0"},
+		{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "9223372036854775807", "0", "", ""},
+		{"txnitm_zyxwvutsrqponmlkjihgfedcba", "pri_zyxwvutsrqponmlkjihgfedcba", 1, "1", "0", "", ""},
 	})
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("99999999-9999-4999-8999-999999999999", "captured", "101", now, new(now.Add(time.Minute))))
 	// One predicate, one error: an arithmetic overflow is billing.ErrOverflow
@@ -91,7 +91,7 @@ func TestNormalizePaymentActionRequiredAndCreditOnlyAreUnresolved(t *testing.T) 
 	if err != nil || fact.Status != purchase.FactActionRequired {
 		t.Fatalf("action-required fact=%+v err=%v", fact, err)
 	}
-	creditOnly := paymentWireFixture(binding, "completed", "100", "0", "100", "0", "0", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
+	creditOnly := paymentWireFixture(binding, "completed", "100", "0", "100", "0", "0", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0", "", ""}})
 	if _, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, creditOnly, binding, intent, quote); err == nil {
 		t.Fatal("credit-only payment without capture evidence was accepted")
 	} else if capability, ok := errors.AsType[*billing.CapabilityError](err); !ok || capability.Capability.Support != billing.SupportUnresolved || capability.Capability.Reason != "provider_credit_allocation_unresolved" {
@@ -109,7 +109,7 @@ func TestNormalizePaymentProviderCreditIsUnresolved(t *testing.T) {
 		{name: "full", credit: "100", grand: "0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			wire := paymentWireFixture(binding, "completed", "100", "0", tt.credit, "0", tt.grand, "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
+			wire := paymentWireFixture(binding, "completed", "100", "0", tt.credit, "0", tt.grand, "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0", "", ""}})
 			_, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}, wire, binding, intent, quote)
 			capability, ok := errors.AsType[*billing.CapabilityError](err)
 			if !ok || capability.Capability.Support != billing.SupportUnresolved || capability.Capability.Reason != "provider_credit_allocation_unresolved" {
@@ -165,7 +165,7 @@ func TestNormalizePaymentCanonicalizesCaptureAndCreatedTimes(t *testing.T) {
 	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
 	eventAt := now.Add(5*time.Minute + 500*time.Nanosecond)
 	captureAt := now.Add(4*time.Minute + 500*time.Nanosecond)
-	wire := paymentWireFixture(binding, "completed", "100", "0", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
+	wire := paymentWireFixture(binding, "completed", "100", "0", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0", "", ""}})
 	wire.Payments = append(wire.Payments, paymentAttemptFixture("88888888-8888-4888-8888-888888888888", "captured", "100", now.Add(3*time.Minute+500*time.Nanosecond), new(captureAt)))
 	fact, _, err := normalizePayment(Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: eventAt}, wire, binding, intent, quote)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestNormalizePaymentRejectsMalformedAttemptEvidence(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
 	base := func() paddlewire.Payment {
-		wire := paymentWireFixture(binding, "completed", "100", "0", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0"}})
+		wire := paymentWireFixture(binding, "completed", "100", "0", "0", "0", "100", "0", "USD", []paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "100", "0", "", ""}})
 		wire.Payments = append(wire.Payments, paymentAttemptFixture("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "captured", "100", now, new(now.Add(time.Minute))))
 		return wire
 	}
@@ -228,6 +228,9 @@ type paymentLineFixture struct {
 	id, price  string
 	quantity   int64
 	total, tax string
+	// subtotal and discount are empty for the transactions that carry no
+	// discount, which is what a provider sends for most of them.
+	subtotal, discount string
 }
 
 func paymentWireFixture(binding purchase.CollectionBinding, status, total, tax, credit, creditToBalance, grandTotal, balance, currency string, lines []paymentLineFixture) paddlewire.Payment {
@@ -235,18 +238,11 @@ func paymentWireFixture(binding purchase.CollectionBinding, status, total, tax, 
 	out.Details.Totals.Total, out.Details.Totals.Tax, out.Details.Totals.Credit = total, tax, credit
 	out.Details.Totals.CreditToBalance, out.Details.Totals.GrandTotal, out.Details.Totals.Balance, out.Details.Totals.Currency = creditToBalance, grandTotal, balance, currency
 	for _, line := range lines {
-		out.Details.Lines = append(out.Details.Lines, struct {
-			ID       string `json:"id"`
-			PriceID  string `json:"price_id"`
-			Quantity int64  `json:"quantity"`
-			Totals   struct {
-				Total string `json:"total"`
-				Tax   string `json:"tax"`
-			} `json:"totals"`
-		}{ID: line.id, PriceID: line.price, Quantity: line.quantity, Totals: struct {
-			Total string `json:"total"`
-			Tax   string `json:"tax"`
-		}{Total: line.total, Tax: line.tax}})
+		var wire paddlewire.PaymentLine
+		wire.ID, wire.PriceID, wire.Quantity = line.id, line.price, line.quantity
+		wire.Totals.Total, wire.Totals.Tax = line.total, line.tax
+		wire.Totals.Subtotal, wire.Totals.Discount = line.subtotal, line.discount
+		out.Details.Lines = append(out.Details.Lines, wire)
 	}
 	return out
 }
