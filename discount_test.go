@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	billing "github.com/data-insights-ai/rho-billing"
+	"github.com/data-insights-ai/rho-billing/purchase"
 	"github.com/data-insights-ai/rho-paddle/internal/paddlewire"
 )
 
@@ -183,4 +185,74 @@ func TestNormalizePaymentIsUnchangedWithoutADiscount(t *testing.T) {
 	if zero.Totals.Discount != "" {
 		t.Fatal("an unset discount must read as absent, not as a number")
 	}
+}
+
+// The case an EU seller actually bills: a tax-exclusive price with VAT
+// added on top, and a partial discount. Paddle discounts the net, then
+// charges tax on what is left, and every one of those numbers has to
+// reconcile against a quote that knows nothing about the discount.
+func TestNormalizePaymentHandlesAPartialDiscountWithTaxOnTop(t *testing.T) {
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(time.Minute)}
+	binding, intent, quote := exclusivePaymentFixture(t, now)
+
+	// Quoted 100 net. Half off leaves 50 net, 20% VAT on that is 10, so
+	// the customer owes 60.
+	wire := paymentWireFixture(binding, "completed", "60", "10", "0", "0", "60", "0", "USD",
+		[]paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "60", "10", "100", "50"}})
+	wire.Details.Totals.Subtotal, wire.Details.Totals.Discount = "100", "50"
+	wire.Payments = append(wire.Payments, paymentAttemptFixture(
+		"11111111-1111-4111-8111-111111111111", "captured", "60", now, new(now.Add(time.Second))))
+
+	fact, _, err := normalizePayment(event, wire, binding, intent, quote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fact.Gross != 60 || fact.Tax != 10 || fact.Discount != 50 {
+		t.Fatalf("gross %d tax %d discount %d, want 60, 10 and 50", fact.Gross, fact.Tax, fact.Discount)
+	}
+	if len(fact.Lines) != 1 {
+		t.Fatalf("lines = %+v", fact.Lines)
+	}
+	line := fact.Lines[0]
+	// The quote said 100 net. Collected net is gross less tax, 50; the
+	// discount accounts for the other 50.
+	if line.Gross-line.Tax+line.Discount != quote.Lines[0].Amount {
+		t.Fatalf("line %+v does not reconcile against a quote of %d", line, quote.Lines[0].Amount)
+	}
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("fact invalid: %v", err)
+	}
+}
+
+// exclusivePaymentFixture is paymentNormalizationFixture with tax charged
+// on top of the price rather than included in it, which is how a European
+// seller quotes.
+func exclusivePaymentFixture(t *testing.T, now time.Time) (purchase.CollectionBinding, purchase.Intent, purchase.Quote) {
+	t.Helper()
+	scope := billing.Scope{Provider: "paddle", Merchant: "merchant-test", Environment: "sandbox"}
+	service := purchase.New(purchase.NewMemoryRepository(purchase.ReferenceAccount{Account: "account"}), func() time.Time { return now })
+	offer, err := service.PublishOffer(t.Context(), purchase.Offer{Account: "account", Revision: purchase.Revision{ID: "offer", Version: 1}, Name: "Payment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	price, err := service.PublishPrice(t.Context(), purchase.Price{Account: "account", Revision: purchase.Revision{ID: "price", Version: 1}, Offer: offer.Revision, Currency: "USD", UnitAmount: 100, TaxTreatment: purchase.TaxExclusive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoteLines := []purchase.QuoteLineInput{{ID: "line", Price: price.Revision, Quantity: 1}}
+	quote, err := service.CreateQuote(t.Context(), purchase.QuoteInput{Account: "account", ID: "quote", ValidUntil: now.Add(time.Hour), Lines: quoteLines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := service.CreateIntent(t.Context(), purchase.IntentInput{Account: "account", ID: "intent", Operation: "operation", QuoteID: quote.ID, QuoteFingerprint: quote.Fingerprint(), Scope: scope, Actor: "actor", Reason: "reason", ExpiresAt: quote.ValidUntil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := purchase.CollectionBinding{CollectionInput: purchase.CollectionInput{Account: intent.Account, Scope: scope, TransactionID: "txn_abcdefghijklmnopqrstuvwxyz", IntentID: intent.ID, QuoteFingerprint: quote.Fingerprint(), CustomerID: "ctm_abcdefghijklmnopqrstuvwxyz", Actor: "actor", Reason: "reason", EvidenceReference: "evidence"}, CreatedAt: now}
+	binding.Lines = append(binding.Lines, purchase.CollectionLine{
+		ProviderLineID: "txnitm_abcdefghijklmnopqrstuvwxyz", ProviderPriceID: "pri_abcdefghijklmnopqrstuvwxyz",
+		Quantity: 1, Allocations: []purchase.CollectionAllocation{{QuoteLineID: "line", Quantity: 1}},
+	})
+	return binding, intent, quote
 }
