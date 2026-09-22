@@ -4,6 +4,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.4.1] - 2026-09-22
+
+### Fixed
+
+- `go.mod` pinned `rho-billing v0.3.5` while this adapter's behaviour needs
+  `v0.3.7`. The two releases in between are what let a payment settle after
+  the quote it was made against expires; without them, a consumer of v0.4.0
+  that does not itself require the newer version still refuses those
+  payments, which is the opposite of what v0.4.0 says it does. Anyone who
+  required `rho-billing v0.3.7` directly was unaffected, because module
+  resolution takes the highest requirement.
+
+  The pin was stale because the test runs that would have caught it were
+  the database-backed ones, and they only ran nightly in a separate
+  workflow. `scripts/check.sh` now runs the whole suite against the pinned
+  rho-billing (`GOWORK=off`, so a local checkout cannot stand in for it)
+  and CI runs it on every push, with and without a database.
+
+## [0.4.0] - 2026-09-22
+
+### Changed
+
+- **The provider decides the money.** Paddle is the merchant of record: it
+  holds the price list, applies the discounts, charges the card and shows
+  the customer the figure before they agree to it. This adapter used to
+  recompute that figure and refuse the payment when the two disagreed.
+  Every such refusal was a customer who had paid and received nothing,
+  over a disagreement about arithmetic that was not ours to do.
+
+  Gone: the comparison against the quote, the refusal of a price id other
+  than the one quoted, and the upper bound on collection time. A repriced
+  line applies and leaves the binding alone; a payment collected after the
+  quote expired applies. What remains refused is a payment that cannot be
+  read as money, one from another customer or in another currency, and one
+  collected before the purchase it pays for existed.
+
+## [0.3.12] - 2026-09-21
+
+### Fixed
+
+- `testdata/host` pinned an older `rho-billing` than this module, so its
+  build failed with "updates to go.mod needed", which says nothing about
+  the cause. `scripts/check.sh` compares the two and names it.
+
+## [0.3.11] - 2026-09-21
+
+### Changed
+
+- The payment record holds what the provider collected rather than what
+  the quote expected, and a difference is no longer a rejection.
+
+## [0.3.10] - 2026-09-21
+
+### Fixed
+
+- A partial discount with tax charged on top was read as inconsistent
+  totals and refused.
+
+## [0.3.9] - 2026-09-21
+
+### Added
+
+- The transaction that failed in production, pinned as a test.
+
+## [0.3.8] - 2026-09-21
+
+### Fixed
+
+- A provider discount was not read, so a purchase it reduced to zero was
+  refused as a zero-value transaction.
+
 ## [0.3.7] - 2026-09-19
 
 ### Fixed
