@@ -9,8 +9,15 @@ and enforced here.
 
 ## Local setup
 
-Go 1.26, Docker, and a checkout of `rho-billing` next to this one. The module
-file replaces the billing dependency with `../rho-billing`.
+Go 1.26, Docker, and a checkout of `rho-billing` next to this one. A local
+`go.work` (gitignored) substitutes `../rho-billing`, which is how you work on
+both at once.
+
+`scripts/check.sh` switches that off and tests the rho-billing this module
+pins, because that is what consumers get. If you are relying on an unreleased
+rho-billing change, the gate will fail until it is tagged and the pin bumped —
+which is the point. A suite that passes against a checkout nobody else has is
+not a passing suite.
 
 ```sh
 export BILLING_TEST_DATABASE_URL='postgres://billing:billing-local-only@127.0.0.1:55438/billing?sslmode=disable'
