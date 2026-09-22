@@ -99,12 +99,16 @@ func TestNormalizePaymentAcceptsTheTransactionThatFailedInProduction(t *testing.
 	}
 }
 
-// The provider is the authority on money, so its total is recorded as
-// given even when it differs from the quote we showed beforehand. What is
-// still refused is a payload that contradicts itself: those numbers we
-// cannot read at all, and reading them wrongly would put a figure in the
-// ledger that nobody ever charged.
-func TestNormalizePaymentRefusesOnlyAContradictoryPayload(t *testing.T) {
+// Every figure the provider reports is recorded as given. A total that
+// does not follow its own arithmetic, a line discount that disagrees with
+// the transaction's, a discount larger than the list price: all of those
+// are the provider's business, and none of them is a reason to refuse a
+// payment it has already taken.
+//
+// What is still refused is a number that cannot be read as money at all,
+// because reading it wrongly would put a figure in the ledger nobody ever
+// charged.
+func TestNormalizePaymentRecordsWhateverTheProviderReports(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(5 * time.Minute)}
 
@@ -112,18 +116,27 @@ func TestNormalizePaymentRefusesOnlyAContradictoryPayload(t *testing.T) {
 		name                                 string
 		subtotal, total, discount, lineTotal string
 		lineSubtotal, lineDiscount           string
+		wantGross, wantDiscount              int64
 	}{
 		{
 			name:     "line discount disagrees with the transaction discount",
 			subtotal: "100", total: "50", discount: "50", lineTotal: "50", lineSubtotal: "100", lineDiscount: "10",
+			wantGross: 50, wantDiscount: 50,
 		},
 		{
 			name:     "discount larger than the list price",
 			subtotal: "100", total: "0", discount: "150", lineTotal: "0", lineSubtotal: "100", lineDiscount: "150",
+			wantGross: 0, wantDiscount: 150,
 		},
 		{
 			name:     "totals do not follow the provider's own arithmetic",
 			subtotal: "100", total: "20", discount: "30", lineTotal: "20", lineSubtotal: "100", lineDiscount: "30",
+			wantGross: 20, wantDiscount: 30,
+		},
+		{
+			name:     "a discount with no subtotal to check it against",
+			subtotal: "", total: "50", discount: "50", lineTotal: "50", lineSubtotal: "", lineDiscount: "50",
+			wantGross: 50, wantDiscount: 50,
 		},
 	}
 	for _, c := range cases {
@@ -137,27 +150,37 @@ func TestNormalizePaymentRefusesOnlyAContradictoryPayload(t *testing.T) {
 					"11111111-1111-4111-8111-111111111111", "captured", c.total,
 					now.Add(time.Minute), new(now.Add(2*time.Minute))))
 			}
-			if _, _, err := normalizePayment(event, wire, binding, intent, quote); err == nil {
-				t.Fatalf("%s was accepted", c.name)
+			fact, _, err := normalizePayment(event, wire, binding, intent, quote)
+			if err != nil {
+				t.Fatalf("%s was refused: %v", c.name, err)
+			}
+			if fact.Gross != c.wantGross || fact.Discount != c.wantDiscount {
+				t.Fatalf("gross %d discount %d, want %d and %d", fact.Gross, fact.Discount, c.wantGross, c.wantDiscount)
+			}
+			if err := fact.Validate(); err != nil {
+				t.Fatalf("fact invalid: %v", err)
 			}
 		})
 	}
 }
 
-// A discount that cannot be verified is refused rather than trusted: the
-// subtotal is what makes the arithmetic checkable.
-func TestNormalizePaymentNeedsASubtotalToVerifyADiscount(t *testing.T) {
+// A figure that is not money at all is still refused.
+func TestNormalizePaymentRefusesUnreadableMoney(t *testing.T) {
 	now := time.Date(2026, 9, 16, 8, 0, 0, 0, time.UTC)
 	event := Event{ID: "evt_abcdefghijklmnopqrstuvwxyz", Type: "transaction.completed", OccurredAt: now.Add(5 * time.Minute)}
-	binding, intent, quote := paymentNormalizationFixture(t, now, 1)
-	wire := paymentWireFixture(binding, "completed", "50", "0", "0", "0", "50", "0", "USD",
-		[]paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, "50", "0", "100", "50"}})
-	// Subtotal deliberately absent.
-	wire.Details.Totals.Subtotal, wire.Details.Totals.Discount = "", "50"
-	wire.Payments = append(wire.Payments, paymentAttemptFixture(
-		"11111111-1111-4111-8111-111111111111", "captured", "50", now.Add(time.Minute), new(now.Add(2*time.Minute))))
-	if _, _, err := normalizePayment(event, wire, binding, intent, quote); err == nil {
-		t.Fatal("an unverifiable discount was accepted")
+	for _, c := range []struct{ name, total, tax string }{
+		{name: "not a number", total: "fifty", tax: "0"},
+		{name: "negative", total: "-50", tax: "0"},
+		{name: "tax larger than the amount it was charged on", total: "50", tax: "60"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			binding, intent, quote := paymentNormalizationFixture(t, now, 1)
+			wire := paymentWireFixture(binding, "completed", c.total, c.tax, "0", "0", c.total, "0", "USD",
+				[]paymentLineFixture{{"txnitm_abcdefghijklmnopqrstuvwxyz", "pri_abcdefghijklmnopqrstuvwxyz", 1, c.total, c.tax, "", ""}})
+			if _, _, err := normalizePayment(event, wire, binding, intent, quote); err == nil {
+				t.Fatalf("%s was accepted", c.name)
+			}
+		})
 	}
 }
 

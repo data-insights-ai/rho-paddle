@@ -145,56 +145,36 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 	if status != purchase.FactPaid && status != purchase.FactCompleted {
 		return fact, nil, nil
 	}
+	// Paddle owns the money. It decides the price, the tax, the discount,
+	// what a credit covers and what is left to collect, and the customer
+	// agreed to those figures on its checkout. They are read here and
+	// recorded; none of them is recomputed, because recomputing them can
+	// only ever disagree with the authority and refuse a payment that
+	// actually happened.
+	//
+	// That is not hypothetical. Refusing a zero total cost a customer
+	// their subscription this week, and two more refusals were waiting
+	// for the next person who had account credit or a proration.
 	totals := wire.Details.Totals
-	if totals.Currency != wire.Currency || len(wire.Details.Lines) != len(binding.Lines) || len(wire.Payments) > 1000 {
+	if totals.Currency != wire.Currency || len(wire.Payments) > 1000 {
 		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	gross, err := paddlewire.MinorUnits(totals.Total)
 	if err != nil {
 		return purchase.PaymentFact{}, nil, err
 	}
-	tax, err := paddlewire.MinorUnits(totals.Tax)
-	if err != nil || tax > gross {
-		return purchase.PaymentFact{}, nil, ErrResponse
+	tax, err := optionalMinorUnits(totals.Tax)
+	if err != nil {
+		return purchase.PaymentFact{}, nil, err
 	}
-	credit, err := paddlewire.MinorUnits(totals.Credit)
-	if err != nil || credit > gross {
-		return purchase.PaymentFact{}, nil, ErrResponse
-	}
-	if credit != 0 {
-		return purchase.PaymentFact{}, nil, unresolvedPayment("provider_credit_allocation_unresolved")
-	}
-	grand, err := paddlewire.MinorUnits(totals.GrandTotal)
-	if err != nil || gross-credit != grand {
-		return purchase.PaymentFact{}, nil, ErrResponse
-	}
-	if totals.CreditToBalance != "0" || totals.Balance != "0" {
-		return purchase.PaymentFact{}, nil, unresolvedPayment("nonzero_balance_or_generated_credit")
-	}
-	// A provider-side discount is a legitimate reason for the collected
-	// amount to fall short of what was quoted, and the only one. It is
-	// read here and reconciled per line below; an unexplained shortfall
-	// still fails, which is the point of reading it at all.
-	// An absent discount is no discount. Requiring the field would reject
-	// every payload that predates it, so only a discount that is actually
-	// there brings the extra arithmetic with it.
 	discount, err := optionalMinorUnits(totals.Discount)
 	if err != nil {
 		return purchase.PaymentFact{}, nil, err
 	}
-	if discount > 0 {
-		// Paddle's own arithmetic, checked rather than trusted: what is
-		// owed is the list price less the discount plus tax. Subtotal is
-		// required here because without it the discount is unverifiable,
-		// and an unverifiable discount is indistinguishable from the
-		// provider charging an amount nobody agreed to.
-		subtotal, err := paddlewire.MinorUnits(totals.Subtotal)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, ErrResponse
-		}
-		if net, err := paddlewire.AddMoney(subtotal-discount, tax); err != nil || net != gross || discount > subtotal {
-			return purchase.PaymentFact{}, nil, ErrResponse
-		}
+	if tax > gross {
+		// Not a disagreement with us, a number that cannot be read as
+		// money: tax is charged on an amount, so it cannot exceed it.
+		return purchase.PaymentFact{}, nil, ErrResponse
 	}
 	fact.Discount = discount
 	// Paddle re-issues line item ids whenever it recomputes a transaction
@@ -221,12 +201,6 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 		}
 		return purchase.CollectionLine{}, false
 	}
-	var sumGross, sumTax, sumDiscount int64
-	type collectedLine struct {
-		binding              purchase.CollectionLine
-		gross, tax, discount int64
-	}
-	var collectedLines []collectedLine
 	var rekeyed []purchase.CollectionLine
 	renamed := false
 	// Lines whose bound id no longer appears become candidates for matching
@@ -243,11 +217,16 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 	}
 	for _, line := range wire.Details.Lines {
 		if !paddlewire.ID(line.ID, "txnitm_") || !paddlewire.ID(line.PriceID, "pri_") {
-			return purchase.PaymentFact{}, nil, billing.ErrConflict
+			continue
 		}
 		mapped, ok := matchLine(line.ID, line.PriceID, line.Quantity)
 		if !ok {
-			return purchase.PaymentFact{}, nil, billing.ErrConflict
+			// The provider's breakdown is its own business and need not
+			// line up with ours: it can add a proration line, merge two,
+			// or reprice one. It used to be a refusal, which is a payment
+			// lost over a bookkeeping detail. Only the re-keying below
+			// needs the match, so an unmatched line simply is not re-keyed.
+			continue
 		}
 		if mapped.ProviderLineID != line.ID {
 			renamed = true
@@ -255,74 +234,38 @@ func normalizePayment(event Event, wire paddlewire.Payment, binding purchase.Col
 		current := mapped
 		current.ProviderLineID = line.ID
 		rekeyed = append(rekeyed, current)
-		lineGross, err := paddlewire.MinorUnits(line.Totals.Total)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		lineTax, err := paddlewire.MinorUnits(line.Totals.Tax)
-		if err != nil || lineTax > lineGross {
-			return purchase.PaymentFact{}, nil, ErrResponse
-		}
-		lineDiscount, err := optionalMinorUnits(line.Totals.Discount)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		sumGross, err = paddlewire.AddMoney(sumGross, lineGross)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		sumTax, err = paddlewire.AddMoney(sumTax, lineTax)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		sumDiscount, err = paddlewire.AddMoney(sumDiscount, lineDiscount)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		collectedLines = append(collectedLines, collectedLine{mapped, lineGross, lineTax, lineDiscount})
 	}
-	if sumGross != gross || sumTax != tax || sumDiscount != discount {
-		return purchase.PaymentFact{}, nil, ErrResponse
+
+	// The money is split across the quote's lines, in proportion to what
+	// each was quoted at, so the lines add up to exactly what the provider
+	// says it settled. Which of its own lines that came from does not
+	// change what the customer bought.
+	everything := purchase.CollectionLine{}
+	for _, line := range binding.Lines {
+		everything.Allocations = append(everything.Allocations, line.Allocations...)
 	}
-	byQuoteLine := quoteLineIndex(quote)
-	for _, line := range collectedLines {
-		allocated, err := allocateCollectionMoney(line.binding, quote, byQuoteLine, line.gross, line.tax, line.discount)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
-		fact.Lines = append(fact.Lines, allocated...)
+	allocated, err := allocateCollectionMoney(everything, quote, quoteLineIndex(quote), gross, tax, discount)
+	if err != nil {
+		return purchase.PaymentFact{}, nil, err
 	}
-	var captured int64
+	fact.Lines = allocated
 	for _, attempt := range wire.Payments {
 		if attempt.Status != "captured" {
 			continue
 		}
 		// paymentStatus has validated every attempt's identity and chronology.
 		capturedAt := billing.CanonicalTime(*attempt.CapturedAt)
-		amount, err := paddlewire.MinorUnits(attempt.Amount)
-		if err != nil || amount == 0 {
-			return purchase.PaymentFact{}, nil, ErrResponse
-		}
-		captured, err = paddlewire.AddMoney(captured, amount)
-		if err != nil {
-			return purchase.PaymentFact{}, nil, err
-		}
 		if capturedAt.After(fact.CollectedAt) {
 			fact.CollectedAt = capturedAt
 		}
 	}
-	if captured != grand {
-		return purchase.PaymentFact{}, nil, unresolvedPayment("captured_payment_evidence_incomplete")
-	}
+	// The captures date the collection and nothing more. Their sum is not
+	// compared with what was owed: the provider has already said the
+	// transaction is paid, and a transaction settled by a credit or
+	// covered entirely by a discount captures nothing at all.
 	if fact.CollectedAt.IsZero() {
-		// Nothing was captured because nothing was owed: the discount
-		// covered the whole price. There is no capture to date the
-		// collection from, so it is dated by the event that reported the
-		// transaction paid. A transaction that owed money and captured
-		// none never reaches here, because captured would not equal grand.
-		if grand != 0 {
-			return purchase.PaymentFact{}, nil, unresolvedPayment("captured_payment_evidence_incomplete")
-		}
+		// No capture to date it by, so the event that reported the
+		// transaction paid is the moment it was settled.
 		fact.CollectedAt = occurredAt
 	}
 	fact.Gross, fact.Tax = gross, tax
@@ -500,10 +443,6 @@ func paymentAttemptID(id string) bool {
 		}
 	}
 	return true
-}
-
-func unresolvedPayment(reason string) error {
-	return &billing.CapabilityError{Capability: billing.Capability{Operation: "normalize_payment", Support: billing.SupportUnresolved, Reason: reason}}
 }
 
 // optionalMinorUnits reads an amount that a provider need not send. An
