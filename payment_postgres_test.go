@@ -91,11 +91,19 @@ func TestTransactionProcessorMismatchesRollbackInboxEffects(t *testing.T) {
 	}{
 		{name: "customer", currency: "USD", customer: "ctm_zyxwvutsrqponmlkjihgfedcba", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_abcdefghijklmnopqrstuvwxyz"},
 		{name: "currency", currency: "EUR", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_abcdefghijklmnopqrstuvwxyz"},
-		// A line id alone is not evidence of a mismatch: the provider re-issues
-		// line ids (see TestTransactionProcessorAcceptsReissuedLineIDsAndRekeysBinding).
-		// A different price under the bound id, or under a new one, is.
-		{name: "price", currency: "USD", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_abcdefghijklmnopqrstuvwxyz", price: "pri_zyxwvutsrqponmlkjihgfedcba"},
-		{name: "price under new line id", currency: "USD", customer: "ctm_abcdefghijklmnopqrstuvwxyz", line: "txnitm_zyxwvutsrqponmlkjihgfedcba", price: "pri_zyxwvutsrqponmlkjihgfedcba"},
+		// Neither a line id nor a price id is evidence of a mismatch. The
+		// provider re-issues line ids when it recomputes a transaction (see
+		// TestTransactionProcessorAcceptsReissuedLineIDsAndRekeysBinding),
+		// and the price is the provider's to decide: it is the merchant of
+		// record, the customer saw its figure and paid it, and a discount,
+		// a price change or a currency conversion between quote and
+		// payment is a normal event, not evidence of a wrong purchase (see
+		// TestTransactionProcessorTakesTheProvidersPrice).
+		//
+		// What remains here is not arithmetic. A payment from another
+		// customer, or in another currency than the binding was made in,
+		// is not this purchase at all, and applying it would credit the
+		// wrong account or the wrong amount of money.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -286,9 +294,38 @@ func TestTransactionProcessorAcceptsReissuedLineIDsAndRekeysBinding(t *testing.T
 	if err := f.process(t, "evt_rekeycompletedabcdefghijkl", "transaction.completed", "completed", "USD", f.binding.CustomerID, reissued, "pri_abcdefghijklmnopqrstuvwxyz"); err != nil {
 		t.Fatalf("completed after rekey: %v", err)
 	}
-	// A different price under a new id is not a re-issue; it is a different
-	// purchase and is refused.
-	if err := f.process(t, "evt_rekeyotherpriceabcdefghijk", "transaction.completed", "completed", "USD", f.binding.CustomerID, "txnitm_otherabcdefghijklmnopqrstu", "pri_otherabcdefghijklmnopqrstu"); !errors.Is(err, billing.ErrConflict) {
-		t.Fatalf("different price under new id: %v, want ErrConflict", err)
+	// A different price under a new id is taken as well. Refusing it used
+	// to look like prudence and was the opposite: the customer had paid,
+	// the provider considered the subscription live, and this account saw
+	// a purchase that never completed.
+	if err := f.process(t, "evt_rekeyotherpriceabcdefghijk", "transaction.completed", "completed", "USD", f.binding.CustomerID, "txnitm_otherabcdefghijklmnopqrstu", "pri_otherabcdefghijklmnopqrstu"); err != nil {
+		t.Fatalf("different price under new id: %v", err)
+	}
+}
+
+// The provider is the merchant of record: it holds the price list, applies
+// the discounts and takes the money. A price id that is not the one quoted
+// means the customer was charged something else — a discount they entered,
+// a price we changed between quote and checkout — and they were shown that
+// figure before they paid it. Recomputing it here and refusing to agree
+// left paid customers with nothing.
+func TestTransactionProcessorTakesTheProvidersPrice(t *testing.T) {
+	f := newPaymentFixture(t, "other-price", true)
+	if err := f.process(t, "evt_otherpriceabcdefghijklmnop", "transaction.completed", "completed", "USD", f.binding.CustomerID, "txnitm_abcdefghijklmnopqrstuvwxyz", "pri_zyxwvutsrqponmlkjihgfedcba"); err != nil {
+		t.Fatalf("payment under another price: %v", err)
+	}
+	assertPaymentEffects(t, &f)
+	binding, err := purchase.New(f.store.Purchases(), func() time.Time { return f.clock }).
+		CollectionBinding(t.Context(), f.account, f.binding.Scope, f.binding.TransactionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The binding is left as it was. Re-keying it needs a line the
+	// provider's breakdown and ours agree on, and a repriced line is not
+	// one: there is nothing to say which bound line it replaced. The
+	// binding keeps what was quoted, the payment record keeps what was
+	// collected, and neither pretends to be the other.
+	if len(binding.Lines) != 1 || binding.Lines[0].ProviderPriceID != "pri_abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("binding = %+v", binding.Lines)
 	}
 }

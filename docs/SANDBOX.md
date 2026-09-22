@@ -14,7 +14,7 @@ go test . -run '^TestSandbox' -count=1 -v
 
 The key file lives outside the repository, with mode `0600` and a private
 parent directory. Credentials never go in source, command arguments, fixtures
-or checked-in environment files — `scripts/check-local.sh` unsets both sandbox
+or checked-in environment files — `scripts/check.sh` unsets both sandbox
 variables so the gate cannot pick them up by accident.
 
 Tests create everything they need and archive it afterwards. No identifier from

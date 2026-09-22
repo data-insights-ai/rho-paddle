@@ -42,7 +42,7 @@ Out of scope:
 
 Sandbox credentials are read from a key file with mode `0600`, referenced by
 environment variable, never from source, command arguments or committed files.
-`scripts/check-local.sh` unsets the sandbox variables so the ordinary gate
+`scripts/check.sh` unsets the sandbox variables so the ordinary gate
 cannot reach a provider even if the environment is set.
 
 Webhook verification runs on the raw request bytes before any parsing, so a

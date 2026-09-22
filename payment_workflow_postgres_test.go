@@ -63,7 +63,12 @@ func TestTransactionProcessorNonpaidConvergenceAndPaidFence(t *testing.T) {
 	assertWorkflowPaymentRejection(t, &f, "evt_00000000000000000000000004", purchase.RejectStaleObservation)
 }
 
-func TestTransactionProcessorDurablyRecordsExpiredCollectionRejection(t *testing.T) {
+// A quote expires so that its price cannot be claimed forever. It does not
+// expire the money: a customer who opens the checkout, is asked by their
+// bank to confirm, and comes back twenty minutes later has paid, and the
+// provider has the money. Refusing that left them paying for nothing,
+// which is the one outcome worth avoiding.
+func TestTransactionProcessorAcceptsCollectionAfterTheQuoteExpires(t *testing.T) {
 	f := newPaymentFixture(t, "expired-collection", true)
 	collected := f.intent.ExpiresAt.Add(time.Second)
 	body := workflowPaymentBody(workflowPayment{
@@ -73,8 +78,7 @@ func TestTransactionProcessorDurablyRecordsExpiredCollectionRejection(t *testing
 		Total: "100", Tax: "0", Attempts: []workflowAttempt{{ID: "55555555-5555-4555-8555-555555555555", Status: "captured", Amount: "100", CreatedAt: collected.Add(-time.Second), CapturedAt: collected}},
 	})
 	processWorkflowBody(t, &f, body, "expired-worker")
-	assertWorkflowPaymentRejection(t, &f, "evt_00000000000000000000000005", purchase.RejectCollectionTime)
-	assertNoPaymentEffects(t, &f)
+	assertWorkflowPaymentState(t, &f, purchase.PaymentPaid)
 	var state string
 	if err := f.db.QueryRowContext(t.Context(), `SELECT state FROM billing_inbox WHERE account_id=$1 AND message_id=$2`, f.account, "evt_00000000000000000000000005").Scan(&state); err != nil {
 		t.Fatal(err)
@@ -82,6 +86,23 @@ func TestTransactionProcessorDurablyRecordsExpiredCollectionRejection(t *testing
 	if state != "processed" {
 		t.Fatalf("inbox state=%q, want processed", state)
 	}
+}
+
+// The one collection time still refused is one that cannot have happened:
+// money taken before the purchase it pays for existed. That is not a late
+// customer, it is an event belonging to something else.
+func TestTransactionProcessorRejectsCollectionBeforeTheIntent(t *testing.T) {
+	f := newPaymentFixture(t, "impossible-collection", true)
+	collected := f.intent.CreatedAt.Add(-time.Hour)
+	body := workflowPaymentBody(workflowPayment{
+		EventID: "evt_00000000000000000000000009", EventType: "transaction.completed", OccurredAt: collected.Add(time.Second),
+		Status: "completed", AccountCustomer: f.binding.CustomerID,
+		Lines: []workflowLine{{ID: "txnitm_abcdefghijklmnopqrstuvwxyz", PriceID: "pri_abcdefghijklmnopqrstuvwxyz", Quantity: 1, Total: "100", Tax: "0"}},
+		Total: "100", Tax: "0", Attempts: []workflowAttempt{{ID: "99999999-9999-4999-8999-999999999999", Status: "captured", Amount: "100", CreatedAt: collected.Add(-time.Second), CapturedAt: collected}},
+	})
+	processWorkflowBody(t, &f, body, "impossible-worker")
+	assertWorkflowPaymentRejection(t, &f, "evt_00000000000000000000000009", purchase.RejectCollectionTime)
+	assertNoPaymentEffects(t, &f)
 }
 
 func TestTransactionProcessorReorderedTaxInclusiveLines(t *testing.T) {

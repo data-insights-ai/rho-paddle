@@ -11,4 +11,4 @@ behaviour. The core module is `github.com/data-insights-ai/rho-billing`.
 - Never retry an uncertain monetary mutation blindly.
 - Verify raw webhook bytes before parsing and commit receipt before success.
 - Provider IDs are scoped by merchant and environment.
-- `sh scripts/check-local.sh` unsets sandbox credentials.
+- `sh scripts/check.sh` unsets sandbox credentials.

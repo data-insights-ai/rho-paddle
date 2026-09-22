@@ -3,10 +3,36 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  # The whole suite, database half included. It used to run nightly in a
+  # separate workflow while every push reported green without it, so a
+  # change that broke the database-backed tests looked fine until the next
+  # morning — which is how four releases went out over broken tests.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: billing
+          POSTGRES_PASSWORD: billing-ci-only
+          POSTGRES_DB: billing
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U billing -d billing"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    env:
+      BILLING_TEST_DATABASE_URL: postgres://billing:billing-ci-only@localhost:5432/billing?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sh scripts/check.sh
+
+  # And without one: the database-backed tests must skip themselves rather
+  # than fail, so that a contributor with no Postgres still gets a usable
+  # signal. That property is only true if something checks it.
   unit:
-    # No database. Database-backed tests skip themselves, so this runs the
-    # suite's unit half plus vet, the signature fuzz target and the external
-    # host module. The integration half runs in integration.yml.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -14,31 +14,35 @@ file replaces the billing dependency with `../rho-billing`.
 
 ```sh
 export BILLING_TEST_DATABASE_URL='postgres://billing:billing-local-only@127.0.0.1:55438/billing?sslmode=disable'
-sh scripts/check-local.sh
+sh scripts/check.sh
 ```
 
-There are two gates.
+`scripts/check.sh` is the gate: race tests, vet, the signature fuzz target and
+the external host module, plus the durable dispatch, recovery and inbox tests
+against Postgres when `BILLING_TEST_DATABASE_URL` is set. Without it that half
+skips itself, and the script says so on the first line.
 
-`scripts/check.sh` needs no database: race tests, vet, the signature fuzz
-target and the external host module. Database-backed tests skip themselves when
-`BILLING_TEST_DATABASE_URL` is unset. This is what CI runs on every push.
+Run it with a database before opening a pull request. CI runs it both ways, so
+a skip is not a pass.
 
-`scripts/check-local.sh` is the full gate and additionally runs the durable
-dispatch, recovery and inbox tests against Postgres. That half is integration
-testing, so CI runs it nightly and on demand rather than per push — which means
-**it is on you to run it before opening a pull request.**
-
-Both unset `PADDLE_SANDBOX_TEST` and `PADDLE_SANDBOX_KEY_FILE` and contact no
+It unsets `PADDLE_SANDBOX_TEST` and `PADDLE_SANDBOX_KEY_FILE` and contacts no
 provider.
 
 Sandbox tests are opt-in and separate: [docs/SANDBOX.md](docs/SANDBOX.md).
 
 ## CI
 
-`.github/workflows/check.yml` runs the database-free gate on every push;
-`integration.yml` runs the Postgres half nightly and on demand. Both are a
-single checkout: `rho-billing` is a published module and resolves from the
-proxy like any other dependency. No secret is needed, and neither workflow
+`.github/workflows/check.yml` runs `scripts/check.sh` twice on every push:
+once against a Postgres service, once without one. The first is the gate. The
+second is there because the database-backed tests are supposed to skip
+themselves rather than fail, and that is only true if something checks it.
+
+The Postgres half used to run nightly in its own workflow while every push
+reported green without it. A change that broke it looked fine until the next
+morning, and four releases went out over tests nobody had run.
+
+Both are a single checkout: `rho-billing` is a published module and resolves
+from the proxy like any other dependency. No secret is needed, and neither job
 contacts Paddle.
 
 ## What the review looks for
@@ -75,6 +79,6 @@ documentation.
 ## Pull requests
 
 One concern per pull request. Say what changed and why, and paste the
-`check-local.sh` result. If a sandbox scenario was involved, say which evidence
+`check.sh` result (say whether it ran with a database). If a sandbox scenario was involved, say which evidence
 class it proves (API acceptance, captured payment, completed processing, or a
 simulated webhook) rather than calling all four "passed".

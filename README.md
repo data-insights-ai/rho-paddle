@@ -68,10 +68,12 @@ is `ChargeSubscription`.
 
 ```sh
 go test ./...
-BILLING_TEST_DATABASE_URL='postgres://…' sh scripts/check-local.sh
+BILLING_TEST_DATABASE_URL='postgres://…' sh scripts/check.sh
 ```
 
-`check-local.sh` unsets Paddle sandbox env. HTTP is fake. Opt-in live
+`check.sh` runs the whole suite; the database-backed half skips itself when
+`BILLING_TEST_DATABASE_URL` is unset, and the script says which half it ran.
+It unsets Paddle sandbox env. HTTP is fake. Opt-in live
 sandbox tests need `PADDLE_SANDBOX_TEST=1` and a key file (mode 0600),
 never credentials in git or argv.
 
