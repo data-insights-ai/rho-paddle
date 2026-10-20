@@ -4,6 +4,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.5.0] - 2026-10-20
+
+### Changed
+
+- Rebuilt as the stateless Paddle plugin of rho-billing v0.5 `provider`:
+  checkout, customer portal, catalog, one-time charges and a webhook
+  handler that decodes `subscription.*` and `transaction.completed`.
+  Duplicates and ignored kinds answer 200; host failures 500.
+
+### Removed
+
+- Postgres storage, workers, recovery scans, purchases, refunds,
+  adjustments and the rho-billing v0.3 integration. Hosts that use them stay
+  on v0.4.1.
+
 ## [0.4.1] - 2026-09-22
 
 ### Fixed

@@ -1,94 +1,40 @@
 # rho-paddle
 
-Paddle Billing adapter for `github.com/data-insights-ai/rho-billing`. It maps Paddle
-HTTP, webhooks and subscription commands onto the core library. It is not
-a general Paddle SDK.
+The Paddle Billing plugin of [rho-billing](https://github.com/data-insights-ai/rho-billing)'s
+`provider` interface. Stateless: it talks to Paddle and verifies its
+webhooks; the host keeps every record and decides what an event means.
 
-Module: `github.com/data-insights-ai/rho-paddle`. License: Apache 2.0. Go 1.26.
-Depends on `github.com/data-insights-ai/rho-billing`. Release: `v0.3.1`.
-
-The host owns routes, authorization, worker scheduling and secret
-storage. Constructors do no I/O.
-
-## Install
-
-```
-require github.com/data-insights-ai/rho-billing v0.3.1
-require github.com/data-insights-ai/rho-paddle v0.3.1
-```
-
-To develop against a local `rho-billing` checkout, put one beside this
-repository and use a workspace — `go work init . ../rho-billing`. The module
-file carries no `replace`, so the published module resolves its dependency
-normally.
-
-## Boundary
-
-Paddle owns customers, payment methods, tax, invoices and collection.
-This adapter sends commands and turns Paddle facts into core purchase,
-subscription and adjustment records. It does not store cards or invoice
-PDFs.
-
-`ErrUncertain` means a mutation may have reached Paddle (timeout after
-POST, malformed success). Record unknown and reconcile. Do not retry
-the mutation blindly. HTTP 429 is `ErrRateLimited` with `RetryAfter`, parsed
-from either `Retry-After` form. The client itself never waits or retries.
-
-A dispatched checkout or refund distinguishes three outcomes. Refused before
-the mutation could take effect (429, 401, 403, 408) returns the message to the
-queue with `integration.ErrBackpressure` and retries after the provider's
-delay. A response that may reflect a mutation stays unknown for recovery. Only
-a definite provider rejection is terminal.
-
-## Operations
+Module: `github.com/data-insights-ai/rho-paddle`. License: Apache 2.0.
 
 | Call | What it does |
 |---|---|
-| `New` | Merchant + sandbox/live. No network. |
-| `CreateCustomer` | Paddle customer with host operation correlation. |
-| `CreateCheckout` | Automatic catalog-price transaction. |
-| `Transaction` / `Transactions` | Read by known id or list. |
-| `CreatePortalSession` | Temporary portal URLs. Do not log or persist them. |
-| `Subscription` | Read. |
-| `UpdateSubscription` | Items + proration mode. |
-| `ChargeSubscription` | One-off catalog prices on an automatic subscription. GET the subscription first; empty/manual collection is unsupported. Timeout after POST is `ErrUncertain`; recover with `Transactions` (`origin=subscription_charge`, `subscription_id`). |
-| `PauseSubscription` / `ResumeSubscription` / `CancelSubscription` | Capability check first. Resume does not accept `next_billing_period` (Paddle: `immediately` or RFC3339). Next-period pause/cancel require `scheduled_change` on the response. Timeout after submit is `ErrUncertain`. |
-| `CreateAdjustment` / `Adjustment` / `Adjustments` | Refunds. Full refunds omit `items` on the wire. Known-id recovery uses GET by adjustment id. |
-| `NewRefundService` / `PlanRefund` / `Dispatch` / `RecoverRefund` | Durable outbox refunds. |
-| `NewWebhookVerifier` + `integration.ReceiveWebhook` | Verify raw body, then persist. |
-| `NewCheckoutService` / `PlanCheckout` / `Dispatch` / `RecoverCheckout` | Durable outbox checkout. |
-| `CreateNotificationSetting` / `DeleteNotificationSetting` | Notification destination. |
-| `NewTransactionProcessor` / `NewAdjustmentProcessor` | Apply authenticated inbox claims. The transaction processor makes no provider calls; the adjustment processor looks up original adjustments for chargeback reversals, so it needs a `Client` and a lease that allows for it. |
+| `New` | Sandbox or live, API key, webhook secrets. No network. |
+| `Checkout` | A transaction for catalog prices with the host's reference; answers Paddle's checkout URL. |
+| `CustomerPortal` | A link to Paddle's self-service pages for a customer. |
+| `Catalog` | Every product with its prices (active and archived), with the host's references from custom data. |
+| `Charge` | A one-time price billed with a subscription's next renewal. |
+| `Webhooks` | An `http.Handler`: verifies `Paddle-Signature` on the raw body (5-minute window), decodes `subscription.*` and `transaction.completed`, and calls the host. |
+| `Verify`, `Decode` | The same, for hosts with their own handler. |
 
-Manual invoice collection is unsupported on charge. Automatic top-up
-is fail-closed: Paddle has no native auto-top-up API. Host collection
-is `ChargeSubscription`.
+The host's reference travels as custom data `reference` on transactions,
+subscriptions, products and prices.
 
-## Tests
+## Webhooks
 
-```sh
-go test ./...
-BILLING_TEST_DATABASE_URL='postgres://…' sh scripts/check.sh
-```
+Paddle delivers at least once, late and out of order. The handler answers
+200 when the host's function succeeded or the event kind is not one the
+host needs, 401 for a bad signature and 500 when the host failed, which
+Paddle retries. The host treats an event it has seen as success and keeps
+subscriptions with `subscription.Apply`, which ignores stale snapshots.
 
-`check.sh` runs the whole suite; the database-backed half skips itself when
-`BILLING_TEST_DATABASE_URL` is unset, and the script says which half it ran.
-It unsets Paddle sandbox env. HTTP is fake. Opt-in live
-sandbox tests need `PADDLE_SANDBOX_TEST=1` and a key file (mode 0600),
-never credentials in git or argv.
+## Uncertain outcomes
 
-Opt-in sandbox tests, and the merchant setup they need:
-[docs/SANDBOX.md](docs/SANDBOX.md). Which operations fail closed and why:
-[docs/CAPABILITIES.md](docs/CAPABILITIES.md).
+`ErrUncertain` means a mutation may have reached Paddle. Paddle has no
+idempotency keys: record a charge before asking for it, and reconcile an
+uncertain one instead of repeating it. `ErrRateLimited` carries Paddle's
+delay; the client never waits or retries by itself.
 
-## Documentation
+## Checks
 
-- [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what Paddle supports, what
-  fails closed, and how a failed call is classified.
-- [docs/SANDBOX.md](docs/SANDBOX.md) — opt-in sandbox tests.
-- [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md),
-  [CHANGELOG.md](CHANGELOG.md).
-
-## Status
-
-`v0.3.1`. Pre-1.0: the exported API may change between minor versions.
+`sh scripts/check.sh` runs the suite against the pinned rho-billing with no
+credentials. Sandbox tests are opt-in: `docs/SANDBOX.md`.
