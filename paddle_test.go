@@ -189,3 +189,26 @@ func TestCompletedTransactionsBecomePayments(t *testing.T) {
 		t.Errorf("payment: %+v", p)
 	}
 }
+
+func TestRefusalsAreAPIErrors(t *testing.T) {
+	c, err := paddle.New(paddle.Config{
+		Environment: paddle.Sandbox, APIKey: "pdl_sdbx_test", WebhookSecrets: []string{"whsec"},
+		HTTPClient: &http.Client{Transport: refusing{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.CustomerPortal(t.Context(), "ctm_01aaaaaaaaaaaaaaaaaaaaaaaaaa")
+	var refused *paddle.APIError
+	if !errors.As(err, &refused) || refused.StatusCode != http.StatusNotFound || refused.Code != "not_found" ||
+		refused.RequestID != "req_1" || refused.Detail != "Customer not found." {
+		t.Fatalf("err = %+v", err)
+	}
+}
+
+type refusing struct{}
+
+func (refusing) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+		Body: io.NopCloser(strings.NewReader(`{"error":{"code":"not_found","detail":"Customer not found."},"meta":{"request_id":"req_1"}}`))}, nil
+}

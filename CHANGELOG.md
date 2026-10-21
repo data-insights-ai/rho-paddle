@@ -4,6 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.5.1] - 2026-10-21
+
+### Added
+
+- `APIError`: a refused request's status, Paddle error code, request id
+  and Paddle's explanation (`Detail`, control characters removed, capped at
+  300 bytes, dropped if it contains the API key). `Detail` is not part of
+  `Error()`, so it reaches a log only when the host puts it there.
+
 ## [0.5.0] - 2026-10-20
 
 ### Changed

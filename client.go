@@ -27,6 +27,11 @@ var (
 	ErrRateLimited = paddlehttp.ErrRateLimited
 )
 
+// APIError is a request Paddle refused or could not answer: the HTTP status
+// (0 when Paddle was not reached), Paddle's error code and request id, and
+// its explanation in Detail. Take it with errors.As.
+type APIError = paddlehttp.Error
+
 // ReferenceKey is the custom data field that carries the host's reference
 // on transactions, subscriptions, products and prices.
 const ReferenceKey = "reference"

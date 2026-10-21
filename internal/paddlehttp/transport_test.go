@@ -194,3 +194,28 @@ func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 func response(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
+
+func TestRefusalsCarryPaddlesExplanation(t *testing.T) {
+	const key = "pdl_sdbx_secret"
+	long := strings.Repeat("é", 400)
+	for body, want := range map[string]string{
+		`{"error":{"code":"bad_request","detail":"customer_id:\nnot found"},"meta":{"request_id":"req_1"}}`: "customer_id: not found",
+		`{"error":{"code":"bad_request","detail":"echo ` + key + `"}}`:                                      "",
+		`{"error":{"code":"bad_request","detail":"` + long + `"}}`:                                          strings.Repeat("é", maxDetail/2),
+	} {
+		client, err := New(Config{APIKey: key, BaseURL: "https://api.paddle.com", HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusBadRequest, body), nil
+		})}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Do(t.Context(), http.MethodPost, "/customers/ctm_1/portal-sessions", []byte(`{}`))
+		var refused *Error
+		if !errors.As(err, &refused) || refused.Code != "bad_request" || refused.Detail != want {
+			t.Errorf("%s: %+v", body, err)
+		}
+		if strings.Contains(err.Error(), "customer_id") {
+			t.Errorf("the explanation is in Error(): %v", err)
+		}
+	}
+}

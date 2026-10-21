@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -51,6 +52,10 @@ type Response struct {
 type Error struct {
 	StatusCode int
 	Code       string
+	// Detail is Paddle's explanation for a person, without control
+	// characters and capped; it is not part of Error(), so it reaches a log
+	// only when the host chooses to put it there.
+	Detail     string
 	RequestID  string
 	Uncertain  bool
 	RetryAfter time.Duration
@@ -165,7 +170,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (Resp
 		return result, nil
 	}
 
-	code, bodyRequestID, structured := providerError(responseBody)
+	code, detail, bodyRequestID, structured := providerError(responseBody)
 	code = c.diagnostic(code)
 	bodyRequestID = c.diagnostic(bodyRequestID)
 	if requestID == "" {
@@ -178,7 +183,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (Resp
 			uncertain = true
 		}
 	}
-	return result, newError(resp.StatusCode, code, requestID, uncertain, retryAfter, contextCause(ctx))
+	refused := newError(resp.StatusCode, code, requestID, uncertain, retryAfter, contextCause(ctx))
+	if structured {
+		refused.Detail = c.detail(detail)
+	}
+	return result, refused
 }
 
 func (c *Client) diagnostic(value string) string {
@@ -186,6 +195,24 @@ func (c *Client) diagnostic(value string) string {
 		return ""
 	}
 	return safeToken(value)
+}
+
+// maxDetail caps Paddle's explanation; longer ones are cut at a rune.
+const maxDetail = 300
+
+func (c *Client) detail(value string) string {
+	if c.apiKey != "" && strings.Contains(value, c.apiKey) {
+		return ""
+	}
+	value = strings.Join(strings.FieldsFunc(value, unicode.IsControl), " ")
+	if len(value) > maxDetail {
+		cut := maxDetail
+		for cut > 0 && !utf8.RuneStart(value[cut]) {
+			cut--
+		}
+		value = value[:cut]
+	}
+	return strings.TrimSpace(value)
 }
 
 func (c *Client) transportError(ctx context.Context, method string) error {
@@ -261,21 +288,22 @@ func validJSONObject(body []byte) bool {
 	return json.Unmarshal(body, &value) == nil && value != nil
 }
 
-func providerError(body []byte) (code, requestID string, ok bool) {
+func providerError(body []byte) (code, detail, requestID string, ok bool) {
 	var envelope struct {
 		Error struct {
-			Code string `json:"code"`
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
 		} `json:"error"`
 		Meta struct {
 			RequestID string `json:"request_id"`
 		} `json:"meta"`
 	}
 	if json.Unmarshal(body, &envelope) != nil {
-		return "", "", false
+		return "", "", "", false
 	}
 	code = safeToken(envelope.Error.Code)
 	requestID = safeToken(envelope.Meta.RequestID)
-	return code, requestID, code != ""
+	return code, envelope.Error.Detail, requestID, code != ""
 }
 
 func safeToken(value string) string {
