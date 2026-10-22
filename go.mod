@@ -11,3 +11,5 @@ retract (
 	v0.2.0 // Superseded; same.
 	v0.1.0 // Superseded; sandbox tests carried provider object identifiers.
 )
+
+retract v0.6.0 // CreateCustomer answered any customer whose email address Paddle reported as taken

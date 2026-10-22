@@ -4,6 +4,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.6.1] - 2026-10-22
+
+### Security
+
+- `CreateCustomer` no longer answers an existing Paddle customer just
+  because Paddle reports the email address as taken: that customer is
+  answered only when its `custom_data.reference` equals the request's
+  reference exactly, else `ErrCustomerExists`. v0.6.0 linked whichever
+  customer had the address; do not use it.
+
 ## [0.6.0] - 2026-10-22
 
 ### Added

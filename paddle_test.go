@@ -226,26 +226,40 @@ func TestCreateCustomerKeepsTheAccountsReference(t *testing.T) {
 	}
 }
 
-type conflicting struct{ detail string }
+// conflicting refuses the address as taken and answers the customer that
+// has it.
+type conflicting struct{ detail, existing string }
 
 func (c conflicting) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodGet {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+			Body: io.NopCloser(strings.NewReader(c.existing))}, nil
+	}
 	return &http.Response{StatusCode: http.StatusConflict, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
 		Body: io.NopCloser(strings.NewReader(`{"error":{"code":"customer_already_exists","detail":"` + c.detail + `"},"meta":{"request_id":"req_2"}}`))}, nil
 }
 
-func TestATakenAddressAnswersItsCustomer(t *testing.T) {
-	for detail, want := range map[string]string{
-		"customer email conflicts with customer of ID ctm_01hv8wt8nffez4p2t6typn4a5j": "ctm_01hv8wt8nffez4p2t6typn4a5j",
-		"customer email conflicts":                                                     "",
+func TestATakenAddressIsNeverSomeoneElsesCustomer(t *testing.T) {
+	const id = "ctm_01hv8wt8nffez4p2t6typn4a5j"
+	taken := "customer email conflicts with customer of ID " + id
+	for name, c := range map[string]struct {
+		conflict conflicting
+		want     string
+	}{
+		"this account's":       {conflicting{taken, `{"data":{"id":"` + id + `","custom_data":{"reference":"org-1"}}}`}, id},
+		"another account's":    {conflicting{taken, `{"data":{"id":"` + id + `","custom_data":{"reference":"org-2"}}}`}, ""},
+		"a prefix of it":       {conflicting{taken, `{"data":{"id":"` + id + `","custom_data":{"reference":"org-1x"}}}`}, ""},
+		"without a reference":  {conflicting{taken, `{"data":{"id":"` + id + `"}}`}, ""},
+		"unnamed in the error": {conflicting{"customer email conflicts", ""}, ""},
 	} {
-		c, err := paddle.New(paddle.Config{Environment: paddle.Sandbox, APIKey: "pdl_sdbx_test", WebhookSecrets: []string{"whsec"},
-			HTTPClient: &http.Client{Transport: conflicting{detail}}})
+		client, err := paddle.New(paddle.Config{Environment: paddle.Sandbox, APIKey: "pdl_sdbx_test", WebhookSecrets: []string{"whsec"},
+			HTTPClient: &http.Client{Transport: c.conflict}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		id, err := c.CreateCustomer(t.Context(), provider.CustomerRequest{Email: "pay@acme.example"})
-		if id != want || (want == "") == (err == nil) {
-			t.Errorf("%q: customer %q, %v", detail, id, err)
+		got, err := client.CreateCustomer(t.Context(), provider.CustomerRequest{Email: "victim@example.com", Reference: "org-1"})
+		if got != c.want || (c.want == "") != errors.Is(err, paddle.ErrCustomerExists) {
+			t.Errorf("%s: customer %q, %v", name, got, err)
 		}
 	}
 }

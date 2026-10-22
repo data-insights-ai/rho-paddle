@@ -13,10 +13,16 @@ import (
 // existingCustomer finds the customer Paddle names when an address is taken.
 var existingCustomer = regexp.MustCompile(`\bctm_[0-9a-z]{26}\b`)
 
-// CreateCustomer creates a Paddle customer for the account. Paddle keeps
-// one customer per email address; when the address has one already, that
-// customer is answered, so a person who buys for several accounts pays as
-// one customer.
+// ErrCustomerExists: Paddle has a customer with that email address that is
+// not this account's (its reference differs or is missing). It is never
+// answered as the account's customer, so nobody gets another person's
+// invoices or payment methods by naming their address.
+var ErrCustomerExists = errors.New("paddle: a customer with this email address belongs to someone else")
+
+// CreateCustomer creates a Paddle customer with the account's reference.
+// Paddle keeps one customer per email address: when the address has one,
+// it is answered only if its reference is exactly this account's (an
+// earlier attempt that created it), else ErrCustomerExists.
 func (c *Client) CreateCustomer(ctx context.Context, r provider.CustomerRequest) (string, error) {
 	body := map[string]any{"email": r.Email}
 	if r.Name != "" {
@@ -25,19 +31,31 @@ func (c *Client) CreateCustomer(ctx context.Context, r provider.CustomerRequest)
 	if r.Reference != "" {
 		body["custom_data"] = map[string]string{ReferenceKey: r.Reference}
 	}
-	var out struct {
-		Data struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
+	var out customer
 	err := c.call(ctx, http.MethodPost, "/customers", body, &out)
 	var refused *APIError
-	if errors.As(err, &refused) && refused.Code == "customer_already_exists" {
-		if id := existingCustomer.FindString(refused.Detail); id != "" {
-			return id, nil
-		}
+	if !errors.As(err, &refused) || refused.Code != "customer_already_exists" {
+		return out.Data.ID, err
 	}
-	return out.Data.ID, err
+	id := existingCustomer.FindString(refused.Detail)
+	if id == "" || r.Reference == "" {
+		return "", ErrCustomerExists
+	}
+	var existing customer
+	if err := c.call(ctx, http.MethodGet, "/customers/"+url.PathEscape(id), nil, &existing); err != nil {
+		return "", err
+	}
+	if existing.Data.ID != id || existing.Data.CustomData[ReferenceKey] != r.Reference {
+		return "", ErrCustomerExists
+	}
+	return id, nil
+}
+
+type customer struct {
+	Data struct {
+		ID         string            `json:"id"`
+		CustomData map[string]string `json:"custom_data"`
+	} `json:"data"`
 }
 
 // GetTransaction reads a transaction: its customer, subscription and the
