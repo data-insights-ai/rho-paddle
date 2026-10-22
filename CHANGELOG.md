@@ -4,6 +4,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.7.0] - 2026-10-22
+
+### Added
+
+- `ClaimCustomer`: `CreateCustomer` for an address the host has proven to be
+  the buyer's own. An existing Paddle customer with that address and no
+  `custom_data.reference` gets this account's reference (its other custom
+  data kept) and is answered; one whose reference is another account's is
+  still refused with `ErrCustomerExists`.
+
 ## [0.6.1] - 2026-10-22
 
 ### Security

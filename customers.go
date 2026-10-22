@@ -24,6 +24,19 @@ var ErrCustomerExists = errors.New("paddle: a customer with this email address b
 // it is answered only if its reference is exactly this account's (an
 // earlier attempt that created it), else ErrCustomerExists.
 func (c *Client) CreateCustomer(ctx context.Context, r provider.CustomerRequest) (string, error) {
+	return c.customerFor(ctx, r, false)
+}
+
+// ClaimCustomer is CreateCustomer for an address the host has proven to be
+// the buyer's own (verified at sign-in, or confirmed by a mailed code): an
+// existing customer without a reference becomes this account's customer,
+// its other custom data kept. A customer whose reference is another
+// account's is never taken over (ErrCustomerExists).
+func (c *Client) ClaimCustomer(ctx context.Context, r provider.CustomerRequest) (string, error) {
+	return c.customerFor(ctx, r, true)
+}
+
+func (c *Client) customerFor(ctx context.Context, r provider.CustomerRequest, claim bool) (string, error) {
 	body := map[string]any{"email": r.Email}
 	if r.Name != "" {
 		body["name"] = r.Name
@@ -45,8 +58,22 @@ func (c *Client) CreateCustomer(ctx context.Context, r provider.CustomerRequest)
 	if err := c.call(ctx, http.MethodGet, "/customers/"+url.PathEscape(id), nil, &existing); err != nil {
 		return "", err
 	}
-	if existing.Data.ID != id || existing.Data.CustomData[ReferenceKey] != r.Reference {
+	reference := existing.Data.CustomData[ReferenceKey]
+	switch {
+	case existing.Data.ID != id:
 		return "", ErrCustomerExists
+	case reference == r.Reference:
+		return id, nil
+	case reference != "" || !claim:
+		return "", ErrCustomerExists
+	}
+	data := map[string]string{}
+	for k, v := range existing.Data.CustomData {
+		data[k] = v
+	}
+	data[ReferenceKey] = r.Reference
+	if err := c.call(ctx, http.MethodPatch, "/customers/"+url.PathEscape(id), map[string]any{"custom_data": data}, nil); err != nil {
+		return "", err
 	}
 	return id, nil
 }

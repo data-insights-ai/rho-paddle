@@ -274,3 +274,45 @@ func TestGetTransactionNamesItsCustomerAndSubscription(t *testing.T) {
 		t.Errorf("transaction %+v, %v", got, err)
 	}
 }
+
+type claimable struct {
+	conflicting
+	patched *string
+}
+
+func (c claimable) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodPatch {
+		body, _ := io.ReadAll(r.Body)
+		*c.patched = r.URL.Path + " " + string(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+			Body: io.NopCloser(strings.NewReader(`{"data":{}}`))}, nil
+	}
+	return c.conflicting.RoundTrip(r)
+}
+
+func TestAProvenAddressClaimsACustomerNobodyReferences(t *testing.T) {
+	const id = "ctm_01hv8wt8nffez4p2t6typn4a5j"
+	taken := "customer email conflicts with customer of ID " + id
+	for name, c := range map[string]struct {
+		existing string
+		want     string
+		patch    string
+	}{
+		"without a reference":   {`{"data":{"id":"` + id + `","custom_data":{"project":"other"}}}`, id, `/customers/` + id + ` {"custom_data":{"project":"other","reference":"org-1"}}`},
+		"without custom data":   {`{"data":{"id":"` + id + `"}}`, id, `/customers/` + id + ` {"custom_data":{"reference":"org-1"}}`},
+		"this account's":        {`{"data":{"id":"` + id + `","custom_data":{"reference":"org-1"}}}`, id, ""},
+		"another account's":     {`{"data":{"id":"` + id + `","custom_data":{"reference":"org-2"}}}`, "", ""},
+		"another id in the GET": {`{"data":{"id":"ctm_01hv8wt8nffez4p2t6typn4a5k"}}`, "", ""},
+	} {
+		var patched string
+		client, err := paddle.New(paddle.Config{Environment: paddle.Sandbox, APIKey: "pdl_sdbx_test", WebhookSecrets: []string{"whsec"},
+			HTTPClient: &http.Client{Transport: claimable{conflicting{taken, c.existing}, &patched}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.ClaimCustomer(t.Context(), provider.CustomerRequest{Email: "buyer@example.com", Reference: "org-1"})
+		if got != c.want || (c.want == "") != errors.Is(err, paddle.ErrCustomerExists) || patched != c.patch {
+			t.Errorf("%s: customer %q, %v, patch %q", name, got, err, patched)
+		}
+	}
+}
