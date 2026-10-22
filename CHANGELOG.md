@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.6.0] - 2026-10-22
+
+### Added
+
+- `CreateCustomer` (rho-billing v0.6 `provider.CustomerRequest`): creates a
+  Paddle customer with the account's reference as custom data; an email
+  address Paddle already has answers that customer.
+- `GetTransaction`: a transaction's status, customer, subscription and
+  reference, for links the host did not start (renewal recovery).
+
+### Changed
+
+- Requires rho-billing v0.6.0.
+
 ## [0.5.1] - 2026-10-21
 
 ### Added

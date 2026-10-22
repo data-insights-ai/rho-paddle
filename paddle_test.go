@@ -212,3 +212,51 @@ func (refusing) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
 		Body: io.NopCloser(strings.NewReader(`{"error":{"code":"not_found","detail":"Customer not found."},"meta":{"request_id":"req_1"}}`))}, nil
 }
+
+func TestCreateCustomerKeepsTheAccountsReference(t *testing.T) {
+	c, f := client(t, map[string]string{
+		"POST /customers": `{"data":{"id":"ctm_01hv8wt8nffez4p2t6typn4a5j","email":"pay@acme.example"}}`,
+	})
+	id, err := c.CreateCustomer(t.Context(), provider.CustomerRequest{Email: "pay@acme.example", Name: "Acme", Reference: "org-1"})
+	if err != nil || id != "ctm_01hv8wt8nffez4p2t6typn4a5j" {
+		t.Fatalf("customer %q, %v", id, err)
+	}
+	if b := f.bodies[0]; b["email"] != "pay@acme.example" || b["name"] != "Acme" || b["custom_data"].(map[string]any)["reference"] != "org-1" {
+		t.Errorf("request: %v", b)
+	}
+}
+
+type conflicting struct{ detail string }
+
+func (c conflicting) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusConflict, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+		Body: io.NopCloser(strings.NewReader(`{"error":{"code":"customer_already_exists","detail":"` + c.detail + `"},"meta":{"request_id":"req_2"}}`))}, nil
+}
+
+func TestATakenAddressAnswersItsCustomer(t *testing.T) {
+	for detail, want := range map[string]string{
+		"customer email conflicts with customer of ID ctm_01hv8wt8nffez4p2t6typn4a5j": "ctm_01hv8wt8nffez4p2t6typn4a5j",
+		"customer email conflicts":                                                     "",
+	} {
+		c, err := paddle.New(paddle.Config{Environment: paddle.Sandbox, APIKey: "pdl_sdbx_test", WebhookSecrets: []string{"whsec"},
+			HTTPClient: &http.Client{Transport: conflicting{detail}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := c.CreateCustomer(t.Context(), provider.CustomerRequest{Email: "pay@acme.example"})
+		if id != want || (want == "") == (err == nil) {
+			t.Errorf("%q: customer %q, %v", detail, id, err)
+		}
+	}
+}
+
+func TestGetTransactionNamesItsCustomerAndSubscription(t *testing.T) {
+	c, _ := client(t, map[string]string{
+		"GET /transactions/txn_1": `{"data":{"id":"txn_1","status":"past_due","customer_id":"ctm_1","subscription_id":"sub_1","custom_data":{"reference":"org-1"}}}`,
+	})
+	got, err := c.GetTransaction(t.Context(), "txn_1")
+	want := provider.Transaction{ID: "txn_1", Status: "past_due", Customer: "ctm_1", Subscription: "sub_1", Reference: "org-1"}
+	if err != nil || got != want {
+		t.Errorf("transaction %+v, %v", got, err)
+	}
+}
