@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/data-insights-ai/rho-billing/provider"
 )
@@ -23,6 +24,7 @@ type customPrice struct {
 	Description  string            `json:"description"`
 	UnitPrice    money             `json:"unit_price"`
 	BillingCycle *cycle            `json:"billing_cycle,omitempty"`
+	TrialPeriod  *cycle            `json:"trial_period,omitempty"`
 	ProductID    string            `json:"product_id,omitempty"`
 	Product      *customProduct    `json:"product,omitempty"`
 	CustomData   map[string]string `json:"custom_data,omitempty"`
@@ -59,6 +61,9 @@ func toCustom(it provider.CustomItem, product string) (customItem, error) {
 	}
 	if it.Interval != "" {
 		p.BillingCycle = &cycle{Interval: it.Interval, Frequency: it.Frequency}
+	}
+	if it.TrialDays > 0 {
+		p.TrialPeriod = &cycle{Interval: "day", Frequency: it.TrialDays}
 	}
 	if product != "" {
 		p.ProductID = product
@@ -111,4 +116,12 @@ func (c *Client) ReplaceItems(ctx context.Context, r provider.ReplaceRequest) er
 func (c *Client) CancelAtPeriodEnd(ctx context.Context, subscription string) error {
 	body := map[string]string{"effective_from": "next_billing_period"}
 	return c.call(ctx, http.MethodPost, "/subscriptions/"+url.PathEscape(subscription)+"/cancel", body, nil)
+}
+
+// SetNextBilling moves the subscription's next renewal; Paddle ends the
+// current period then and bills nothing for the change. Paddle refuses it in
+// the same request as an item change, so the two are separate calls.
+func (c *Client) SetNextBilling(ctx context.Context, subscription string, at time.Time) error {
+	body := map[string]string{"next_billed_at": at.UTC().Format(time.RFC3339), "proration_billing_mode": "do_not_bill"}
+	return c.call(ctx, http.MethodPatch, "/subscriptions/"+url.PathEscape(subscription), body, nil)
 }

@@ -374,3 +374,27 @@ func TestCancelAtPeriodEnd(t *testing.T) {
 		t.Errorf("cancel: %v", f.bodies[0])
 	}
 }
+
+func TestATrialDelaysTheFirstCharge(t *testing.T) {
+	c, f := client(t, map[string]string{"POST /transactions": `{"data":{"id":"txn_3","checkout":{"url":"https://pay.example/x"}}}`})
+	_, err := c.Checkout(t.Context(), provider.CheckoutRequest{Custom: []provider.CustomItem{
+		{Name: "AI SOC L", Amount: 500_000, Currency: "EUR", Interval: "month", Frequency: 1, Quantity: 1, TrialDays: 70},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	price := f.bodies[0]["items"].([]any)[0].(map[string]any)["price"].(map[string]any)
+	if trial := price["trial_period"].(map[string]any); trial["interval"] != "day" || trial["frequency"] != float64(70) {
+		t.Errorf("trial: %v", price)
+	}
+}
+
+func TestSetNextBillingMovesTheRenewalWithoutBilling(t *testing.T) {
+	c, f := client(t, map[string]string{"PATCH /subscriptions/sub_1": `{"data":{}}`})
+	if err := c.SetNextBilling(t.Context(), "sub_1", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if f.bodies[0]["next_billed_at"] != "2027-01-01T00:00:00Z" || f.bodies[0]["proration_billing_mode"] != "do_not_bill" || f.bodies[0]["items"] != nil {
+		t.Errorf("body: %v", f.bodies[0])
+	}
+}

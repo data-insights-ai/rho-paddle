@@ -4,6 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.9.0] - 2026-10-23
+
+### Added
+
+- rho-billing v0.8.0: custom items with `TrialDays` send a Paddle
+  `trial_period` in days; `SetNextBilling` patches `next_billed_at` with
+  `proration_billing_mode: do_not_bill` (Paddle refuses it together with an
+  item change, so hosts call it after `ReplaceItems`).
+
 ## [0.8.0] - 2026-10-23
 
 ### Added
