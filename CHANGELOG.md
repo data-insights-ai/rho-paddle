@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.8.0] - 2026-10-23
+
+### Added
+
+- Custom items (rho-billing v0.7.0): `Checkout` sends
+  `CheckoutRequest.Custom` as Paddle non-catalog prices, recurring or
+  one-time, under a non-catalog product of tax category `saas`; the item's
+  reference goes into the price's custom data.
+- `ReplaceItems`: replaces a subscription's items with custom items under
+  the product of its first item, `proration_billing_mode: do_not_bill`, so
+  the next renewal bills the new price.
+- `CancelAtPeriodEnd`: `POST /subscriptions/{id}/cancel` effective from the
+  next billing period.
+
 ## [0.7.0] - 2026-10-22
 
 ### Added

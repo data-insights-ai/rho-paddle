@@ -316,3 +316,61 @@ func TestAProvenAddressClaimsACustomerNobodyReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckoutWithCustomItems(t *testing.T) {
+	c, f := client(t, map[string]string{
+		"POST /transactions": `{"data":{"id":"txn_2","checkout":{"url":"https://pay.example/checkout?_ptxn=txn_2"}}}`,
+	})
+	_, err := c.Checkout(t.Context(), provider.CheckoutRequest{Reference: "org-1", Custom: []provider.CustomItem{
+		{Name: "AI SOC L", Amount: 1_000_000, Currency: "EUR", Interval: "month", Frequency: 1, Quantity: 1, Reference: "contract:c1"},
+		{Name: "Setup", Amount: 1_000_000, Currency: "EUR", Quantity: 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := f.bodies[0]["items"].([]any)
+	recurring := items[0].(map[string]any)["price"].(map[string]any)
+	if recurring["unit_price"].(map[string]any)["amount"] != "1000000" || recurring["billing_cycle"].(map[string]any)["interval"] != "month" ||
+		recurring["product"].(map[string]any)["tax_category"] != "saas" || recurring["custom_data"].(map[string]any)["reference"] != "contract:c1" {
+		t.Errorf("recurring item: %v", recurring)
+	}
+	if setup := items[1].(map[string]any)["price"].(map[string]any); setup["billing_cycle"] != nil || setup["description"] != "Setup" {
+		t.Errorf("one-time item: %v", setup)
+	}
+}
+
+func TestCheckoutRefusesAnInvalidCustomItem(t *testing.T) {
+	c, f := client(t, nil)
+	_, err := c.Checkout(t.Context(), provider.CheckoutRequest{Custom: []provider.CustomItem{{Name: "Free", Currency: "EUR", Quantity: 1}}})
+	if !errors.Is(err, provider.ErrInvalidItem) || len(f.requests) != 0 {
+		t.Fatalf("err %v, requests %v", err, f.requests)
+	}
+}
+
+func TestReplaceItemsKeepsTheProductAndDoesNotBill(t *testing.T) {
+	c, f := client(t, map[string]string{
+		"GET /subscriptions/sub_1":   `{"data":{"items":[{"price":{"id":"pri_old","product_id":"pro_soc"}}]}}`,
+		"PATCH /subscriptions/sub_1": `{"data":{}}`,
+	})
+	err := c.ReplaceItems(t.Context(), provider.ReplaceRequest{Subscription: "sub_1", Items: []provider.CustomItem{
+		{Name: "AI SOC L, year 2", Amount: 750_000, Currency: "EUR", Interval: "month", Frequency: 1, Quantity: 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := f.bodies[1]
+	price := body["items"].([]any)[0].(map[string]any)["price"].(map[string]any)
+	if body["proration_billing_mode"] != "do_not_bill" || price["product_id"] != "pro_soc" || price["product"] != nil {
+		t.Errorf("update: %v", body)
+	}
+}
+
+func TestCancelAtPeriodEnd(t *testing.T) {
+	c, f := client(t, map[string]string{"POST /subscriptions/sub_1/cancel": `{"data":{}}`})
+	if err := c.CancelAtPeriodEnd(t.Context(), "sub_1"); err != nil {
+		t.Fatal(err)
+	}
+	if f.bodies[0]["effective_from"] != "next_billing_period" {
+		t.Errorf("cancel: %v", f.bodies[0])
+	}
+}

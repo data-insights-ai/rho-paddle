@@ -30,9 +30,16 @@ type item struct {
 }
 
 func (c *Client) Checkout(ctx context.Context, r provider.CheckoutRequest) (provider.Checkout, error) {
-	items := make([]item, len(r.Items))
-	for i, it := range r.Items {
-		items[i] = item{PriceID: it.PriceID, Quantity: it.Quantity}
+	items := make([]any, 0, len(r.Items)+len(r.Custom))
+	for _, it := range r.Items {
+		items = append(items, item{PriceID: it.PriceID, Quantity: it.Quantity})
+	}
+	for _, it := range r.Custom {
+		custom, err := toCustom(it, "")
+		if err != nil {
+			return provider.Checkout{}, err
+		}
+		items = append(items, custom)
 	}
 	body := map[string]any{"items": items, "custom_data": map[string]string{ReferenceKey: r.Reference}}
 	if r.Customer != "" {
