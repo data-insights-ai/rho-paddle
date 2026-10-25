@@ -84,26 +84,13 @@ func (c *Client) ReplaceItems(ctx context.Context, r provider.ReplaceRequest) er
 	if len(r.Items) == 0 {
 		return provider.ErrInvalidItem
 	}
-	var current struct {
-		Data struct {
-			Items []struct {
-				Price struct {
-					ProductID string `json:"product_id"`
-				} `json:"price"`
-			} `json:"items"`
-		} `json:"data"`
-	}
 	path := "/subscriptions/" + url.PathEscape(r.Subscription)
-	if err := c.call(ctx, http.MethodGet, path, nil, &current); err != nil {
+	product, err := c.subscriptionProduct(ctx, r.Subscription)
+	if err != nil {
 		return err
-	}
-	var product string
-	if len(current.Data.Items) > 0 {
-		product = current.Data.Items[0].Price.ProductID
 	}
 	items := make([]customItem, len(r.Items))
 	for i, it := range r.Items {
-		var err error
 		if items[i], err = toCustom(it, product); err != nil {
 			return err
 		}
@@ -124,4 +111,25 @@ func (c *Client) CancelAtPeriodEnd(ctx context.Context, subscription string) err
 func (c *Client) SetNextBilling(ctx context.Context, subscription string, at time.Time) error {
 	body := map[string]string{"next_billed_at": at.UTC().Format(time.RFC3339), "proration_billing_mode": "do_not_bill"}
 	return c.call(ctx, http.MethodPatch, "/subscriptions/"+url.PathEscape(subscription), body, nil)
+}
+
+// subscriptionProduct is the product of the subscription's first item:
+// Paddle prices a subscription's non-catalog items under an existing one.
+func (c *Client) subscriptionProduct(ctx context.Context, subscription string) (string, error) {
+	var current struct {
+		Data struct {
+			Items []struct {
+				Price struct {
+					ProductID string `json:"product_id"`
+				} `json:"price"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(subscription), nil, &current); err != nil {
+		return "", err
+	}
+	if len(current.Data.Items) == 0 {
+		return "", nil
+	}
+	return current.Data.Items[0].Price.ProductID, nil
 }

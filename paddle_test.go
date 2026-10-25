@@ -117,6 +117,27 @@ func TestChargeAndPortal(t *testing.T) {
 	}
 }
 
+func TestAChargeAtACustomPriceIsPricedUnderTheSubscriptionsProduct(t *testing.T) {
+	c, f := client(t, map[string]string{
+		"GET /subscriptions/sub_1":         `{"data":{"items":[{"price":{"id":"pri_pro","product_id":"pro_soc"}}]}}`,
+		"POST /subscriptions/sub_1/charge": `{"data":{"id":"sub_1"}}`,
+	})
+	err := c.Charge(t.Context(), provider.ChargeRequest{Subscription: "sub_1", Custom: &provider.CustomItem{
+		Name: "Overage, October 2026", Description: "25 credits at EUR 0.10", Amount: 250, Currency: "EUR", Quantity: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := f.bodies[1]
+	price := body["items"].([]any)[0].(map[string]any)["price"].(map[string]any)
+	if body["effective_from"] != "next_billing_period" || price["product_id"] != "pro_soc" || price["unit_price"].(map[string]any)["amount"] != "250" || price["billing_cycle"] != nil {
+		t.Errorf("charge: %v", body)
+	}
+	if err := c.Charge(t.Context(), provider.ChargeRequest{Subscription: "sub_1"}); !errors.Is(err, provider.ErrInvalidItem) {
+		t.Errorf("a charge without a price: %v", err)
+	}
+}
+
 func sign(body string, at time.Time) string {
 	ts := fmt.Sprint(at.Unix())
 	mac := hmac.New(sha256.New, []byte("whsec"))

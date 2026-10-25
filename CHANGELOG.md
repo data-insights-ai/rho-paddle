@@ -4,6 +4,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.10.0] - 2026-10-25
+
+### Added
+
+- rho-billing v0.9.0: `Charge` with `ChargeRequest.Custom` bills a one-time
+  non-catalog price under the subscription's product (usage at the host's
+  rate); every charge is validated before it is sent.
+
 ## [0.9.0] - 2026-10-23
 
 ### Added

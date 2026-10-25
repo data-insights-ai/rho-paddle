@@ -76,13 +76,26 @@ func (c *Client) CustomerPortal(ctx context.Context, customer string) (string, e
 	return out.Data.URLs.General.Overview, err
 }
 
-// Charge bills a one-time price with the subscription's next renewal.
+// Charge bills a one-time price with the subscription's next renewal: a
+// catalog price, or a custom one priced under the subscription's product.
 // Paddle has no idempotency keys, so the host records a charge before it
 // asks for it and treats an uncertain outcome as possibly done.
 func (c *Client) Charge(ctx context.Context, r provider.ChargeRequest) error {
-	body := map[string]any{
-		"effective_from": "next_billing_period",
-		"items":          []item{{PriceID: r.PriceID, Quantity: r.Quantity}},
+	if err := r.Validate(); err != nil {
+		return err
 	}
+	var items any = []item{{PriceID: r.PriceID, Quantity: r.Quantity}}
+	if r.Custom != nil {
+		product, err := c.subscriptionProduct(ctx, r.Subscription)
+		if err != nil {
+			return err
+		}
+		custom, err := toCustom(*r.Custom, product)
+		if err != nil {
+			return err
+		}
+		items = []customItem{custom}
+	}
+	body := map[string]any{"effective_from": "next_billing_period", "items": items}
 	return c.call(ctx, http.MethodPost, "/subscriptions/"+url.PathEscape(r.Subscription)+"/charge", body, nil)
 }
