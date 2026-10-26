@@ -2,7 +2,7 @@ module github.com/data-insights-ai/rho-paddle
 
 go 1.27.1
 
-require github.com/data-insights-ai/rho-billing v0.9.0
+require github.com/data-insights-ai/rho-billing v0.10.0
 
 // Withdrawn before the first stable release. They remain fetchable from the
 // module proxy, which is immutable, but nothing should select them.
