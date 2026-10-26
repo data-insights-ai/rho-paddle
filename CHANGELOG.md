@@ -4,6 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.11.0] - 2026-10-26
+
+### Added
+
+- rho-billing v0.10.0: a checkout with `CheckoutRequest.Business` bills
+  the customer's business. The customer's active business of that name is
+  reused, created when missing, and given the tax number when it gains or
+  changes one; the transaction carries its `business_id`. The tax number
+  travels only in request bodies, never in a URL or a log. A business
+  without a customer is refused (`ErrBusinessNeedsCustomer`) before Paddle
+  is asked. Checkouts without a business are unchanged.
+
 ## [0.10.0] - 2026-10-25
 
 ### Added

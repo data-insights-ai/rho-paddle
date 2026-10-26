@@ -48,6 +48,13 @@ func (c *Client) Checkout(ctx context.Context, r provider.CheckoutRequest) (prov
 	if r.SuccessURL != "" {
 		body["checkout"] = map[string]string{"url": r.SuccessURL}
 	}
+	if r.Business != nil {
+		id, err := c.businessFor(ctx, r.Customer, *r.Business)
+		if err != nil {
+			return provider.Checkout{}, err
+		}
+		body["business_id"] = id
+	}
 	var out struct {
 		Data struct {
 			ID       string `json:"id"`

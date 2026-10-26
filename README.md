@@ -9,7 +9,7 @@ Module: `github.com/data-insights-ai/rho-paddle`. License: Apache 2.0.
 | Call | What it does |
 |---|---|
 | `New` | Sandbox or live, API key, webhook secrets. No network. |
-| `Checkout` | A transaction for catalog prices with the host's reference; answers Paddle's checkout URL. |
+| `Checkout` | A transaction for catalog prices with the host's reference; answers Paddle's checkout URL. With a `Business`, the customer's business of that name (created or given the new tax number) is billed. |
 | `CustomerPortal` | A link to Paddle's self-service pages for a customer. |
 | `Catalog` | Every product with its prices (active and archived), with the host's references from custom data. |
 | `Charge` | A one-time price billed with a subscription's next renewal. |
