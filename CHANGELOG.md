@@ -4,6 +4,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [0.12.0] - 2026-10-28
+
+### Added
+
+- rho-billing v0.11.0. Webhooks decode `adjustment.created` and
+  `adjustment.updated` (`PaymentAdjusted`), `transaction.payment_failed`
+  (`PaymentFailed`, with the failure code) and `transaction.canceled`
+  (`PaymentCanceled`) instead of answering them as ignored.
+- `Charge` at a custom price carries `ChargeRequest.Key` as custom data
+  `charge_key`; `FindCharge` looks it up on the subscription's next
+  renewal and its transactions. Shapes confirmed in the sandbox.
+- `GetTransaction` answers the transaction's lines.
+- `CreateCustomer` and `ClaimCustomer` send `CustomerRequest.Locale`, and
+  move the account's existing customer to it (confirmed in the sandbox).
+
+### Fixed
+
+- A checkout for a business finds the customer's business beyond the
+  first page of Paddle's list.
+
 ## [0.11.0] - 2026-10-26
 
 ### Added

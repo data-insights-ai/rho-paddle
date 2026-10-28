@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -291,7 +292,7 @@ func TestGetTransactionNamesItsCustomerAndSubscription(t *testing.T) {
 	})
 	got, err := c.GetTransaction(t.Context(), "txn_1")
 	want := provider.Transaction{ID: "txn_1", Status: "past_due", Customer: "ctm_1", Subscription: "sub_1", Reference: "org-1"}
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("transaction %+v, %v", got, err)
 	}
 }

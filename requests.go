@@ -86,7 +86,8 @@ func (c *Client) CustomerPortal(ctx context.Context, customer string) (string, e
 // Charge bills a one-time price with the subscription's next renewal: a
 // catalog price, or a custom one priced under the subscription's product.
 // Paddle has no idempotency keys, so the host records a charge before it
-// asks for it and treats an uncertain outcome as possibly done.
+// asks for it and treats an uncertain outcome as possibly done; a custom
+// price carries the request's key (ChargeKey), so FindCharge can settle it.
 func (c *Client) Charge(ctx context.Context, r provider.ChargeRequest) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -100,6 +101,12 @@ func (c *Client) Charge(ctx context.Context, r provider.ChargeRequest) error {
 		custom, err := toCustom(*r.Custom, product)
 		if err != nil {
 			return err
+		}
+		if r.Key != "" {
+			if custom.Price.CustomData == nil {
+				custom.Price.CustomData = map[string]string{}
+			}
+			custom.Price.CustomData[ChargeKey] = r.Key
 		}
 		items = []customItem{custom}
 	}

@@ -18,5 +18,5 @@ Contributor notes for the Paddle plugin.
 
 | Host | Pinned | Notes |
 |---|---|---|
-| account-platform | v0.5+ | Paddle source of subscriptions, credit purchases and overage |
+| account-platform | v0.12+ | Paddle source of subscriptions, credit purchases and overage |
 | sigma-scg-platform | v0.4.1 | uses the removed storage-backed adapter; stays pinned until migrated |

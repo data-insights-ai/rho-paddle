@@ -13,3 +13,4 @@ coverage.html
 # machine-local: the published module must resolve its dependency normally.
 go.work
 go.work.sum
+/.worktrees/

@@ -34,17 +34,21 @@ func (c *Client) businessFor(ctx context.Context, customer string, b provider.Bu
 	}
 	name, taxID := strings.TrimSpace(b.Name), strings.TrimSpace(b.TaxID)
 	base := "/customers/" + url.PathEscape(customer) + "/businesses"
-	var found struct {
-		Data []business `json:"data"`
-	}
+	var existing *business
 	query := url.Values{"status": {"active"}, "search": {name}}
-	if err := c.call(ctx, http.MethodGet, base+"?"+query.Encode(), nil, &found); err != nil {
+	err := walk(ctx, c, base+"?"+query.Encode(), func(page []business) bool {
+		for _, b := range page {
+			if strings.EqualFold(strings.TrimSpace(b.Name), name) {
+				existing = &b
+				return true
+			}
+		}
+		return false
+	})
+	if err != nil {
 		return "", err
 	}
-	for _, existing := range found.Data {
-		if !strings.EqualFold(strings.TrimSpace(existing.Name), name) {
-			continue
-		}
+	if existing != nil {
 		if taxID != "" && existing.TaxIdentifier != taxID {
 			if err := c.call(ctx, http.MethodPatch, base+"/"+url.PathEscape(existing.ID), map[string]any{"tax_identifier": taxID}, nil); err != nil {
 				return "", err

@@ -41,6 +41,9 @@ func (c *Client) customerFor(ctx context.Context, r provider.CustomerRequest, cl
 	if r.Name != "" {
 		body["name"] = r.Name
 	}
+	if r.Locale != "" {
+		body["locale"] = r.Locale
+	}
 	if r.Reference != "" {
 		body["custom_data"] = map[string]string{ReferenceKey: r.Reference}
 	}
@@ -63,7 +66,7 @@ func (c *Client) customerFor(ctx context.Context, r provider.CustomerRequest, cl
 	case existing.Data.ID != id:
 		return "", ErrCustomerExists
 	case reference == r.Reference:
-		return id, nil
+		return id, c.keepLocale(ctx, id, existing.Data.Locale, r.Locale)
 	case reference != "" || !claim:
 		return "", ErrCustomerExists
 	}
@@ -72,7 +75,11 @@ func (c *Client) customerFor(ctx context.Context, r provider.CustomerRequest, cl
 		data[k] = v
 	}
 	data[ReferenceKey] = r.Reference
-	if err := c.call(ctx, http.MethodPatch, "/customers/"+url.PathEscape(id), map[string]any{"custom_data": data}, nil); err != nil {
+	patch := map[string]any{"custom_data": data}
+	if r.Locale != "" {
+		patch["locale"] = r.Locale
+	}
+	if err := c.call(ctx, http.MethodPatch, "/customers/"+url.PathEscape(id), patch, nil); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -81,8 +88,18 @@ func (c *Client) customerFor(ctx context.Context, r provider.CustomerRequest, cl
 type customer struct {
 	Data struct {
 		ID         string            `json:"id"`
+		Locale     string            `json:"locale"`
 		CustomData map[string]string `json:"custom_data"`
 	} `json:"data"`
+}
+
+// keepLocale moves the account's existing customer to the account's
+// language, so Paddle's mail and checkout follow it.
+func (c *Client) keepLocale(ctx context.Context, id, current, locale string) error {
+	if locale == "" || locale == current {
+		return nil
+	}
+	return c.call(ctx, http.MethodPatch, "/customers/"+url.PathEscape(id), map[string]any{"locale": locale}, nil)
 }
 
 // GetTransaction reads a transaction: its customer, subscription and the
@@ -95,11 +112,22 @@ func (c *Client) GetTransaction(ctx context.Context, id string) (provider.Transa
 			CustomerID     string            `json:"customer_id"`
 			SubscriptionID string            `json:"subscription_id"`
 			CustomData     map[string]string `json:"custom_data"`
+			Details        struct {
+				LineItems []wireLine `json:"line_items"`
+			} `json:"details"`
 		} `json:"data"`
 	}
 	if err := c.call(ctx, http.MethodGet, "/transactions/"+url.PathEscape(id), nil, &out); err != nil {
 		return provider.Transaction{}, err
 	}
 	d := out.Data
-	return provider.Transaction{ID: d.ID, Status: d.Status, Customer: d.CustomerID, Subscription: d.SubscriptionID, Reference: d.CustomData[ReferenceKey]}, nil
+	tx := provider.Transaction{ID: d.ID, Status: d.Status, Customer: d.CustomerID, Subscription: d.SubscriptionID, Reference: d.CustomData[ReferenceKey]}
+	for _, l := range d.Details.LineItems {
+		total, err := amount(l.Totals.Total)
+		if err != nil {
+			return provider.Transaction{}, err
+		}
+		tx.Lines = append(tx.Lines, provider.Line{ID: l.ID, PriceID: l.PriceID, Quantity: l.Quantity, Total: total})
+	}
+	return tx, nil
 }

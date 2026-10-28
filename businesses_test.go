@@ -96,3 +96,18 @@ func TestACheckoutWithoutABusinessIsUnchanged(t *testing.T) {
 		t.Errorf("requests %v, body %v", f.requests, f.bodies[0])
 	}
 }
+
+func TestACheckoutFindsTheCustomersBusinessBeyondTheFirstPage(t *testing.T) {
+	c, f := client(t, map[string]string{
+		searchHopper: `{"data":[{"id":"biz_other","name":"Hopper Holding"}],
+			"meta":{"pagination":{"has_more":true,"next":"https://sandbox-api.paddle.com/customers/ctm_1/businesses?after=biz_other&search=Hopper+GmbH&status=active"}}}`,
+		"GET /customers/ctm_1/businesses?after=biz_other&search=Hopper+GmbH&status=active": `{"data":[{"id":"biz_1","name":"Hopper GmbH"}],"meta":{"pagination":{"has_more":false}}}`,
+		"POST /transactions": transaction,
+	})
+	if _, err := c.Checkout(t.Context(), businessCheckout(provider.Business{Name: "Hopper GmbH"})); err != nil {
+		t.Fatal(err)
+	}
+	if txn := f.bodies[len(f.bodies)-1]; txn["business_id"] != "biz_1" {
+		t.Errorf("transaction %v; want the business on page 2", txn)
+	}
+}
