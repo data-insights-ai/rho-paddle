@@ -6,6 +6,12 @@ pre-1.0, the exported API may change between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- rho-billing v0.14.1. Adjustment items carry their `type` (full, partial,
+  tax, proration) as `AdjustedLine.Type`; subscription items carry
+  `recurring` as `Item.Recurring`.
+
 ## [0.14.0] - 2026-11-12
 
 ### Added

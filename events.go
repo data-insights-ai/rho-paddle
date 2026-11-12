@@ -21,8 +21,9 @@ type envelope struct {
 }
 
 type wireItem struct {
-	Quantity int `json:"quantity"`
-	Price    struct {
+	Quantity  int  `json:"quantity"`
+	Recurring bool `json:"recurring"`
+	Price     struct {
 		ID string `json:"id"`
 	} `json:"price"`
 }
@@ -115,7 +116,7 @@ func toSubscription(s wireSubscription, rev subscription.Revision) subscription.
 func items(in []wireItem) []subscription.Item {
 	out := make([]subscription.Item, len(in))
 	for i, it := range in {
-		out[i] = subscription.Item{PriceID: it.Price.ID, Quantity: it.Quantity}
+		out[i] = subscription.Item{PriceID: it.Price.ID, Quantity: it.Quantity, Recurring: it.Recurring}
 	}
 	return out
 }
@@ -186,7 +187,7 @@ func toAdjustment(data json.RawMessage) (*provider.Adjustment, error) {
 		if err != nil {
 			return nil, err
 		}
-		a.Items = append(a.Items, provider.AdjustedLine{Line: it.ItemID, Full: it.Type == "full", Total: line})
+		a.Items = append(a.Items, provider.AdjustedLine{Line: it.ItemID, Type: provider.AdjustedType(it.Type), Total: line})
 	}
 	return a, nil
 }

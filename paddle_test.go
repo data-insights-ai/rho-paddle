@@ -148,7 +148,7 @@ func sign(body string, at time.Time) string {
 
 const subscriptionEvent = `{"event_id":"evt_1","event_type":"subscription.updated","occurred_at":"2026-10-20T10:00:00Z",
 	"data":{"id":"sub_1","status":"past_due","customer_id":"ctm_1","custom_data":{"reference":"org-1"},
-	"items":[{"quantity":10,"price":{"id":"pri_pro"}}],
+	"items":[{"quantity":10,"recurring":true,"price":{"id":"pri_pro"}},{"quantity":1,"recurring":false,"price":{"id":"pri_once"}}],
 	"current_billing_period":{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-11-01T00:00:00Z"},
 	"scheduled_change":{"action":"cancel","effective_at":"2026-11-01T00:00:00Z"}}}`
 
@@ -170,7 +170,7 @@ func TestWebhooksDeliverVerifiedEvents(t *testing.T) {
 		t.Fatalf("signed event: %d, %d delivered", code, len(got))
 	}
 	s := got[0].Subscription
-	if s.Status != subscription.PastDue || s.Reference != "org-1" || s.Items[0].Quantity != 10 ||
+	if s.Status != subscription.PastDue || s.Reference != "org-1" || len(s.Items) != 2 || s.Items[0].Quantity != 10 || !s.Items[0].Recurring || s.Items[1].Recurring ||
 		s.CancelAt.IsZero() || s.Revision.EventID != "evt_1" || s.PeriodEnd.Month() != time.November {
 		t.Errorf("subscription: %+v", s)
 	}

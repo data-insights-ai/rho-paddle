@@ -28,7 +28,7 @@ func TestAdjustmentsBecomeEvents(t *testing.T) {
 	}
 	a := e.Adjustment
 	if a.ID != "adj_1" || a.Payment != "txn_1" || a.Action != provider.Refund || a.Status != provider.AdjustmentApproved ||
-		a.Total != 1190 || a.Currency != "EUR" || len(a.Items) != 1 || a.Items[0].Line != "txnitm_2" || a.Items[0].Full || a.Items[0].Total != 1190 {
+		a.Total != 1190 || a.Currency != "EUR" || len(a.Items) != 1 || a.Items[0].Line != "txnitm_2" || a.Items[0].Type != provider.AdjustedPartial || a.Items[0].Full() || a.Items[0].Total != 1190 {
 		t.Errorf("adjustment %+v", a)
 	}
 	for _, kind := range []string{"adjustment.created"} {
