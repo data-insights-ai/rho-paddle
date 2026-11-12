@@ -4,6 +4,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 pre-1.0, the exported API may change between minor versions.
 
+## [Unreleased]
+
+### Added
+
+- `GetTransaction` reads the transaction's `billing_period` into
+  `Transaction.PeriodStart` and `PeriodEnd` (rho-billing unreleased).
+
 ## [0.12.0] - 2026-10-28
 
 ### Added

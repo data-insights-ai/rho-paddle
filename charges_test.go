@@ -3,6 +3,7 @@ package paddle_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/data-insights-ai/rho-billing/provider"
 
@@ -75,7 +76,8 @@ func TestFindChargeNotThere(t *testing.T) {
 
 func TestGetTransactionNamesItsLines(t *testing.T) {
 	c, _ := client(t, map[string]string{
-		"GET /transactions/txn_1": `{"data":{"id":"txn_1","status":"completed","customer_id":"ctm_1","custom_data":{"reference":"org-1"},
+		"GET /transactions/txn_1": `{"data":{"id":"txn_1","status":"completed","customer_id":"ctm_1","subscription_id":"sub_1","custom_data":{"reference":"org-1"},
+			"billing_period":{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-11-01T00:00:00Z"},
 			"details":{"line_items":[{"id":"txnitm_1","price_id":"pri_pack","quantity":2,"totals":{"total":"11900"}}]}}}`,
 	})
 	tx, err := c.GetTransaction(t.Context(), "txn_1")
@@ -84,6 +86,9 @@ func TestGetTransactionNamesItsLines(t *testing.T) {
 	}
 	if l := tx.Lines[0]; l.ID != "txnitm_1" || l.PriceID != "pri_pack" || l.Quantity != 2 || l.Total != 11900 {
 		t.Errorf("line %+v", l)
+	}
+	if tx.Subscription != "sub_1" || !tx.PeriodStart.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || !tx.PeriodEnd.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("subscription %q, period %v to %v", tx.Subscription, tx.PeriodStart, tx.PeriodEnd)
 	}
 }
 

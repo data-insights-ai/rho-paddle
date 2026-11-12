@@ -102,8 +102,8 @@ func (c *Client) keepLocale(ctx context.Context, id, current, locale string) err
 	return c.call(ctx, http.MethodPatch, "/customers/"+url.PathEscape(id), map[string]any{"locale": locale}, nil)
 }
 
-// GetTransaction reads a transaction: its customer, subscription and the
-// host's reference.
+// GetTransaction reads a transaction: its customer, subscription, the
+// host's reference, the billing period it pays for and its lines.
 func (c *Client) GetTransaction(ctx context.Context, id string) (provider.Transaction, error) {
 	var out struct {
 		Data struct {
@@ -112,6 +112,7 @@ func (c *Client) GetTransaction(ctx context.Context, id string) (provider.Transa
 			CustomerID     string            `json:"customer_id"`
 			SubscriptionID string            `json:"subscription_id"`
 			CustomData     map[string]string `json:"custom_data"`
+			BillingPeriod  *wirePeriod       `json:"billing_period"`
 			Details        struct {
 				LineItems []wireLine `json:"line_items"`
 			} `json:"details"`
@@ -122,6 +123,9 @@ func (c *Client) GetTransaction(ctx context.Context, id string) (provider.Transa
 	}
 	d := out.Data
 	tx := provider.Transaction{ID: d.ID, Status: d.Status, Customer: d.CustomerID, Subscription: d.SubscriptionID, Reference: d.CustomData[ReferenceKey]}
+	if p := d.BillingPeriod; p != nil {
+		tx.PeriodStart, tx.PeriodEnd = p.StartsAt, p.EndsAt
+	}
 	for _, l := range d.Details.LineItems {
 		total, err := amount(l.Totals.Total)
 		if err != nil {
