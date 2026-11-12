@@ -6,10 +6,12 @@ pre-1.0, the exported API may change between minor versions.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-12
+
 ### Added
 
 - `GetTransaction` reads the transaction's `billing_period` into
-  `Transaction.PeriodStart` and `PeriodEnd` (rho-billing unreleased).
+  `Transaction.PeriodStart` and `PeriodEnd` (rho-billing v0.12.0).
 
 ## [0.12.0] - 2026-10-28
 
