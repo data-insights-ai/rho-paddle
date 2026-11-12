@@ -94,6 +94,25 @@ type wireLine struct {
 	Totals   struct {
 		Total string `json:"total"`
 	} `json:"totals"`
+	// Proration is set on the lines of a transaction a subscription change
+	// created with proration.
+	Proration *struct {
+		Rate          string     `json:"rate"`
+		BillingPeriod wirePeriod `json:"billing_period"`
+	} `json:"proration"`
+}
+
+// line is a transaction line as the host sees it.
+func (l wireLine) line() (provider.Line, error) {
+	total, err := amount(l.Totals.Total)
+	if err != nil {
+		return provider.Line{}, err
+	}
+	out := provider.Line{ID: l.ID, PriceID: l.PriceID, Quantity: l.Quantity, Total: total}
+	if p := l.Proration; p != nil {
+		out.Proration = &provider.Proration{Rate: p.Rate, PeriodStart: p.BillingPeriod.StartsAt, PeriodEnd: p.BillingPeriod.EndsAt}
+	}
+	return out, nil
 }
 
 func (t wireLines) bills(price string) bool {

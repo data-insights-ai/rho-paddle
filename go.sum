@@ -1,2 +1,4 @@
 github.com/data-insights-ai/rho-billing v0.12.0 h1:uBObxyb5jNoMxI3BQeMQPH+punWj5PDpj9Ad7+fMwKY=
 github.com/data-insights-ai/rho-billing v0.12.0/go.mod h1:fjZVT8ARQxs7031D9hSHhHPphBZPX3P6ymkJQYNxsbo=
+github.com/data-insights-ai/rho-billing v0.13.0 h1:AnBTSh4fHsFDkA1M/DY3Dp76SeHeTfi8/tfBwsEaP0I=
+github.com/data-insights-ai/rho-billing v0.13.0/go.mod h1:fjZVT8ARQxs7031D9hSHhHPphBZPX3P6ymkJQYNxsbo=

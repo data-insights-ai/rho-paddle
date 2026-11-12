@@ -76,19 +76,39 @@ func TestFindChargeNotThere(t *testing.T) {
 
 func TestGetTransactionNamesItsLines(t *testing.T) {
 	c, _ := client(t, map[string]string{
-		"GET /transactions/txn_1": `{"data":{"id":"txn_1","status":"completed","customer_id":"ctm_1","subscription_id":"sub_1","custom_data":{"reference":"org-1"},
+		"GET /transactions/txn_1": `{"data":{"id":"txn_1","status":"completed","origin":"subscription_recurring","customer_id":"ctm_1","subscription_id":"sub_1","custom_data":{"reference":"org-1"},
 			"billing_period":{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-11-01T00:00:00Z"},
-			"details":{"line_items":[{"id":"txnitm_1","price_id":"pri_pack","quantity":2,"totals":{"total":"11900"}}]}}}`,
+			"details":{"line_items":[{"id":"txnitm_1","price_id":"pri_pack","quantity":2,"totals":{"total":"11900"},"proration":null}]}}}`,
 	})
 	tx, err := c.GetTransaction(t.Context(), "txn_1")
 	if err != nil || len(tx.Lines) != 1 {
 		t.Fatalf("%+v %v", tx, err)
 	}
-	if l := tx.Lines[0]; l.ID != "txnitm_1" || l.PriceID != "pri_pack" || l.Quantity != 2 || l.Total != 11900 {
+	if l := tx.Lines[0]; l.ID != "txnitm_1" || l.PriceID != "pri_pack" || l.Quantity != 2 || l.Total != 11900 || l.Proration != nil {
 		t.Errorf("line %+v", l)
 	}
-	if tx.Subscription != "sub_1" || !tx.PeriodStart.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || !tx.PeriodEnd.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
-		t.Errorf("subscription %q, period %v to %v", tx.Subscription, tx.PeriodStart, tx.PeriodEnd)
+	if tx.Origin != provider.OriginSubscriptionRecurring || tx.Prorated() || tx.Subscription != "sub_1" ||
+		!tx.PeriodStart.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || !tx.PeriodEnd.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("origin %q, subscription %q, period %v to %v", tx.Origin, tx.Subscription, tx.PeriodStart, tx.PeriodEnd)
+	}
+}
+
+// A subscription change within its period is a transaction of origin
+// subscription_update whose lines carry their proration.
+func TestGetTransactionReadsAProratedChange(t *testing.T) {
+	c, _ := client(t, map[string]string{
+		"GET /transactions/txn_2": `{"data":{"id":"txn_2","status":"completed","origin":"subscription_update","customer_id":"ctm_1","subscription_id":"sub_1","custom_data":{"reference":"org-1"},
+			"billing_period":{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-11-01T00:00:00Z"},
+			"details":{"line_items":[{"id":"txnitm_2","price_id":"pri_pro","quantity":5,"totals":{"total":"25000"},
+				"proration":{"rate":"0.5","billing_period":{"starts_at":"2026-10-01T00:00:00Z","ends_at":"2026-11-01T00:00:00Z"}}}]}}}`,
+	})
+	tx, err := c.GetTransaction(t.Context(), "txn_2")
+	if err != nil || len(tx.Lines) != 1 || !tx.Prorated() || tx.Origin != provider.OriginSubscriptionUpdate {
+		t.Fatalf("%+v %v", tx, err)
+	}
+	p := tx.Lines[0].Proration
+	if p == nil || p.Rate != "0.5" || !p.PeriodStart.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || !p.PeriodEnd.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("proration %+v", p)
 	}
 }
 

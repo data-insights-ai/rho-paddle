@@ -6,6 +6,13 @@ pre-1.0, the exported API may change between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- rho-billing v0.13.0. `GetTransaction` reads the transaction's `origin`
+  into `Transaction.Origin` and each line's `proration` (rate and billing
+  period) into `Line.Proration`, so a host tells a subscription change's
+  charge from the period's payment (`Transaction.Prorated()`).
+
 ## [0.13.0] - 2026-11-12
 
 ### Added
