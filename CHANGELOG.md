@@ -6,6 +6,8 @@ pre-1.0, the exported API may change between minor versions.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-12
+
 ### Changed
 
 - rho-billing v0.14.1. Adjustment items carry their `type` (full, partial,
